@@ -1,0 +1,743 @@
+{
+    "info": {
+        "name": "Chat Aura API",
+        "description": "Complete API collection for Chat Aura social party rooms app",
+        "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+    },
+    "variable": [
+        {
+            "key": "base_url",
+            "value": "https://chataura.indsoft24.com/api/v1",
+            "type": "string"
+        },
+        {
+            "key": "access_token",
+            "value": "",
+            "type": "string"
+        },
+        {
+            "key": "refresh_token",
+            "value": "",
+            "type": "string"
+        },
+        {
+            "key": "room_id",
+            "value": "",
+            "type": "string"
+        },
+        {
+            "key": "user_id",
+            "value": "",
+            "type": "string"
+        }
+    ],
+    "item": [
+        {
+            "name": "Authentication",
+            "item": [
+                {
+                    "name": "Register",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"phone\": \"+1234567890\",\n  \"password\": \"password123\",\n  \"display_name\": \"Test User\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/auth/register",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "auth",
+                                "register"
+                            ]
+                        }
+                    },
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "exec": [
+                                    "if (pm.response.code === 200) {",
+                                    "    var jsonData = pm.response.json();",
+                                    "    pm.collectionVariables.set('access_token', jsonData.data.access_token);",
+                                    "    pm.collectionVariables.set('refresh_token', jsonData.data.refresh_token);",
+                                    "    pm.collectionVariables.set('user_id', jsonData.data.user.id);",
+                                    "}"
+                                ]
+                            }
+                        }
+                    ]
+                },
+                {
+                    "name": "Login",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"phone\": \"+1234567890\",\n  \"password\": \"password123\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/auth/login",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "auth",
+                                "login"
+                            ]
+                        }
+                    },
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "exec": [
+                                    "if (pm.response.code === 200) {",
+                                    "    var jsonData = pm.response.json();",
+                                    "    pm.collectionVariables.set('access_token', jsonData.data.access_token);",
+                                    "    pm.collectionVariables.set('refresh_token', jsonData.data.refresh_token);",
+                                    "    pm.collectionVariables.set('user_id', jsonData.data.user.id);",
+                                    "}"
+                                ]
+                            }
+                        }
+                    ]
+                },
+                {
+                    "name": "Refresh Token",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"refresh_token\": \"{{refresh_token}}\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/auth/refresh",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "auth",
+                                "refresh"
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Logout",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"refresh_token\": \"{{refresh_token}}\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/auth/logout",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "auth",
+                                "logout"
+                            ]
+                        }
+                    }
+                }
+            ]
+        },
+        {
+            "name": "User",
+            "item": [
+                {
+                    "name": "Get Profile",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/users/me",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "users",
+                                "me"
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Update Profile",
+                    "request": {
+                        "method": "PATCH",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"display_name\": \"Updated Name\",\n  \"avatar_url\": \"https://example.com/avatar.jpg\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/users/me",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "users",
+                                "me"
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Get Wallet",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/users/me/wallet",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "users",
+                                "me",
+                                "wallet"
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Get Transactions",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/users/me/transactions?type=all&page=1&limit=20",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "users",
+                                "me",
+                                "transactions"
+                            ],
+                            "query": [
+                                {
+                                    "key": "type",
+                                    "value": "all"
+                                },
+                                {
+                                    "key": "page",
+                                    "value": "1"
+                                },
+                                {
+                                    "key": "limit",
+                                    "value": "20"
+                                }
+                            ]
+                        }
+                    }
+                }
+            ]
+        },
+        {
+            "name": "Rooms",
+            "item": [
+                {
+                    "name": "Create Room",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"title\": \"My Party Room\",\n  \"max_seats\": 8,\n  \"settings\": {\n    \"allow_video\": true,\n    \"allow_gifts\": true,\n    \"allow_games\": true\n  }\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/rooms",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "rooms"
+                            ]
+                        }
+                    },
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "exec": [
+                                    "if (pm.response.code === 200) {",
+                                    "    var jsonData = pm.response.json();",
+                                    "    pm.collectionVariables.set('room_id', jsonData.data.id);",
+                                    "}"
+                                ]
+                            }
+                        }
+                    ]
+                },
+                {
+                    "name": "List Rooms",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/rooms?page=1&limit=20&sort=recent",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "rooms"
+                            ],
+                            "query": [
+                                {
+                                    "key": "page",
+                                    "value": "1"
+                                },
+                                {
+                                    "key": "limit",
+                                    "value": "20"
+                                },
+                                {
+                                    "key": "sort",
+                                    "value": "recent"
+                                }
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Get Room",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/rooms/{{room_id}}",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "rooms",
+                                "{{room_id}}"
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Update Room",
+                    "request": {
+                        "method": "PATCH",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"title\": \"Updated Room Title\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/rooms/{{room_id}}",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "rooms",
+                                "{{room_id}}"
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Delete Room",
+                    "request": {
+                        "method": "DELETE",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/rooms/{{room_id}}",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "rooms",
+                                "{{room_id}}"
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Join Room",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/rooms/{{room_id}}/join",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "rooms",
+                                "{{room_id}}",
+                                "join"
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Leave Room",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/rooms/{{room_id}}/leave",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "rooms",
+                                "{{room_id}}",
+                                "leave"
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Get Agora Token",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/rooms/{{room_id}}/token",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "rooms",
+                                "{{room_id}}",
+                                "token"
+                            ]
+                        }
+                    }
+                }
+            ]
+        },
+        {
+            "name": "Seats",
+            "item": [
+                {
+                    "name": "List Seats",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/rooms/{{room_id}}/seats",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "rooms",
+                                "{{room_id}}",
+                                "seats"
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Take Seat",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/rooms/{{room_id}}/seats/0/take",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "rooms",
+                                "{{room_id}}",
+                                "seats",
+                                "0",
+                                "take"
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Leave Seat",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/rooms/{{room_id}}/seats/leave",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "rooms",
+                                "{{room_id}}",
+                                "seats",
+                                "leave"
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Mute Seat",
+                    "request": {
+                        "method": "PATCH",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"muted\": true\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/rooms/{{room_id}}/seats/0/mute",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "rooms",
+                                "{{room_id}}",
+                                "seats",
+                                "0",
+                                "mute"
+                            ]
+                        }
+                    }
+                }
+            ]
+        },
+        {
+            "name": "Gifts",
+            "item": [
+                {
+                    "name": "Get Gift Catalog",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/gifts",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "gifts"
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Send Gift",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"gift_id\": \"gift-uuid\",\n  \"receiver_id\": 2,\n  \"quantity\": 1\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/rooms/{{room_id}}/gifts/send",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "rooms",
+                                "{{room_id}}",
+                                "gifts",
+                                "send"
+                            ]
+                        }
+                    }
+                }
+            ]
+        },
+        {
+            "name": "Invite",
+            "item": [
+                {
+                    "name": "Get Invite Info",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/users/me/invite",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "users",
+                                "me",
+                                "invite"
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Apply Invite Code",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Authorization",
+                                "value": "Bearer {{access_token}}"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"invite_code\": \"ABC12345\"\n}"
+                        },
+                        "url": {
+                            "raw": "{{base_url}}/invite/apply",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "invite",
+                                "apply"
+                            ]
+                        }
+                    }
+                }
+            ]
+        }
+    ]
+}
