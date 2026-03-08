@@ -128,7 +128,8 @@ class GroupController extends Controller
     }
 
     /**
-     * GET /groups/{groupId}/members - List group members (as contact-like list).
+     * GET /groups/{groupId}/members - List group members. Paginated.
+     * Query: page (default 1), limit (default 50, max 100).
      */
     public function members(Request $request, int $groupId)
     {
@@ -141,8 +142,12 @@ class GroupController extends Controller
         if (!$isMember) {
             return ApiResponse::forbidden('Not a member of this group');
         }
+        $page = max(1, (int) $request->query('page', 1));
+        $limit = min(max(1, (int) $request->query('limit', 50)), 100);
         $ownerId = (int) $group->created_by;
-        $members = GroupMember::where('chat_group_id', $groupId)->with('user')->get();
+        $query = GroupMember::where('chat_group_id', $groupId)->with('user')->orderBy('created_at', 'asc');
+        $total = $query->count();
+        $members = $query->skip(($page - 1) * $limit)->take($limit)->get();
         $list = $members->map(fn ($m) => [
             'id' => $m->user->id,
             'name' => $m->user->display_name ?? $m->user->name,
@@ -152,7 +157,7 @@ class GroupController extends Controller
             'is_owner' => (int) $m->user_id === $ownerId,
             'conversation_id' => $group->conversation_id,
         ]);
-        return ApiResponse::success($list->values()->all());
+        return ApiResponse::success($list->values()->all(), ApiResponse::paginationMeta($total, $page, $limit));
     }
 
     /**

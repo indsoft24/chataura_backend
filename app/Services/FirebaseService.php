@@ -60,12 +60,7 @@ class FirebaseService
     public function sendToUser(int $userId, string $title, string $body, array $data = []): bool
     {
         $tokens = UserDevice::where('user_id', $userId)->pluck('fcm_token')->filter()->unique()->values()->all();
-        if (empty($tokens)) {
-            Log::debug('FirebaseService: No FCM tokens for user', ['user_id' => $userId]);
-            return false;
-        }
-        if (empty($this->serverKey)) {
-            Log::debug('FirebaseService: FCM_SERVER_KEY not configured');
+        if (empty($tokens) || empty($this->serverKey)) {
             return false;
         }
         $sent = false;
@@ -171,7 +166,11 @@ class FirebaseService
             'message_id' => (string) ($message['id'] ?? ''),
             'sender_id' => (string) ($message['sender_id'] ?? ''),
         ];
-        foreach (['message_type', 'message_text', 'created_at'] as $key) {
+        // FCM reserves "message_type" — use msg_type in data payload
+        if (array_key_exists('message_type', $message) && $message['message_type'] !== null) {
+            $data['msg_type'] = is_string($message['message_type']) ? $message['message_type'] : json_encode($message['message_type']);
+        }
+        foreach (['message_text', 'created_at'] as $key) {
             if (array_key_exists($key, $message) && $message[$key] !== null) {
                 $data[$key] = is_string($message[$key]) ? $message[$key] : json_encode($message[$key]);
             }

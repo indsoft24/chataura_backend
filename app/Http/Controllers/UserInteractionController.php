@@ -69,17 +69,21 @@ class UserInteractionController extends Controller
     }
 
     /**
-     * GET /user/follow-requests - Pending follow requests to the current user (for private accounts).
-     * Returns list of { id, follower_id, name, avatar, level }.
+     * GET /user/follow-requests - Pending follow requests. Paginated.
+     * Query: page (default 1), limit (default 20, max 50).
      */
     public function followRequests(Request $request)
     {
         $user = $request->user();
-        $requests = UserFollower::where('following_id', $user->id)
+        $page = max(1, (int) $request->query('page', 1));
+        $limit = min(max(1, (int) $request->query('limit', 20)), 50);
+
+        $query = UserFollower::where('following_id', $user->id)
             ->where('status', UserFollower::STATUS_PENDING)
             ->with('follower')
-            ->orderBy('created_at', 'desc')
-            ->get()
+            ->orderBy('created_at', 'desc');
+        $total = $query->count();
+        $requests = $query->skip(($page - 1) * $limit)->take($limit)->get()
             ->map(function (UserFollower $f) {
                 $requester = $f->follower;
                 return [
@@ -93,7 +97,7 @@ class UserInteractionController extends Controller
             ->values()
             ->all();
 
-        return ApiResponse::success($requests);
+        return ApiResponse::success($requests, ApiResponse::paginationMeta($total, $page, $limit));
     }
 
     /**
@@ -323,14 +327,22 @@ class UserInteractionController extends Controller
      * GET /user/friend-requests - Pending friend requests to the current user.
      * Returns list of { id, user_id, name, avatar, level } (requester = user_id).
      */
+    /**
+     * GET /user/friend-requests - Incoming friend requests. Paginated.
+     * Query: page (default 1), limit (default 20, max 50).
+     */
     public function friendRequests(Request $request)
     {
         $user = $request->user();
-        $requests = Friendship::where('friend_id', $user->id)
+        $page = max(1, (int) $request->query('page', 1));
+        $limit = min(max(1, (int) $request->query('limit', 20)), 50);
+
+        $query = Friendship::where('friend_id', $user->id)
             ->where('status', Friendship::STATUS_PENDING)
             ->with('user')
-            ->orderBy('created_at', 'desc')
-            ->get()
+            ->orderBy('created_at', 'desc');
+        $total = $query->count();
+        $requests = $query->skip(($page - 1) * $limit)->take($limit)->get()
             ->map(function (Friendship $f) {
                 $requester = $f->user;
                 return [
@@ -344,7 +356,7 @@ class UserInteractionController extends Controller
             ->values()
             ->all();
 
-        return ApiResponse::success($requests);
+        return ApiResponse::success($requests, ApiResponse::paginationMeta($total, $page, $limit));
     }
 
     /**
@@ -416,7 +428,8 @@ class UserInteractionController extends Controller
     }
 
     /**
-     * GET /users/{id}/followers - List of users following this user (ContactDto).
+     * GET /users/{id}/followers - List of users following this user. Paginated.
+     * Query: page (default 1), limit (default 20, max 100).
      */
     public function followers(Request $request, $id)
     {
@@ -429,11 +442,15 @@ class UserInteractionController extends Controller
         if (!$target) {
             return ApiResponse::notFound('User not found');
         }
-        $records = UserFollower::where('following_id', $id)
+        $page = max(1, (int) $request->query('page', 1));
+        $limit = min(max(1, (int) $request->query('limit', 20)), 100);
+
+        $query = UserFollower::where('following_id', $id)
             ->where('status', UserFollower::STATUS_ACCEPTED)
             ->with('follower')
-            ->orderBy('created_at', 'desc')
-            ->get();
+            ->orderBy('created_at', 'desc');
+        $total = $query->count();
+        $records = $query->skip(($page - 1) * $limit)->take($limit)->get();
         $list = $records->map(function (UserFollower $r) use ($viewer) {
             $u = $r->follower;
             if (!$u) {
@@ -448,11 +465,12 @@ class UserInteractionController extends Controller
                 'last_seen_at' => $online['last_seen_at'],
             ];
         })->filter()->values()->all();
-        return ApiResponse::success($list);
+        return ApiResponse::success($list, ApiResponse::paginationMeta($total, $page, $limit));
     }
 
     /**
-     * GET /users/{id}/following - List of users this user is following (ContactDto).
+     * GET /users/{id}/following - List of users this user is following. Paginated.
+     * Query: page (default 1), limit (default 20, max 100).
      */
     public function following(Request $request, $id)
     {
@@ -465,11 +483,15 @@ class UserInteractionController extends Controller
         if (!$target) {
             return ApiResponse::notFound('User not found');
         }
-        $records = UserFollower::where('follower_id', $id)
+        $page = max(1, (int) $request->query('page', 1));
+        $limit = min(max(1, (int) $request->query('limit', 20)), 100);
+
+        $query = UserFollower::where('follower_id', $id)
             ->where('status', UserFollower::STATUS_ACCEPTED)
             ->with('following')
-            ->orderBy('created_at', 'desc')
-            ->get();
+            ->orderBy('created_at', 'desc');
+        $total = $query->count();
+        $records = $query->skip(($page - 1) * $limit)->take($limit)->get();
         $list = $records->map(function (UserFollower $r) use ($viewer) {
             $u = $r->following;
             if (!$u) {
@@ -484,7 +506,7 @@ class UserInteractionController extends Controller
                 'last_seen_at' => $online['last_seen_at'],
             ];
         })->filter()->values()->all();
-        return ApiResponse::success($list);
+        return ApiResponse::success($list, ApiResponse::paginationMeta($total, $page, $limit));
     }
 
     /**
@@ -573,7 +595,8 @@ class UserInteractionController extends Controller
     }
 
     /**
-     * GET /users/{id}/gifts - Gift gallery: gifts received by this user (Charm tab).
+     * GET /users/{id}/gifts - Gift gallery: gifts received by this user (Charm tab). Paginated.
+     * Query: page (default 1), limit (default 20, max 50).
      */
     public function gifts(Request $request, $id)
     {
@@ -585,6 +608,8 @@ class UserInteractionController extends Controller
         if (!$user) {
             return ApiResponse::notFound('User not found');
         }
+        $page = max(1, (int) $request->query('page', 1));
+        $limit = min(max(1, (int) $request->query('limit', 20)), 50);
 
         $received = CoinTransaction::where('receiver_id', $id)
             ->where('transaction_type', CoinTransaction::TYPE_GIFT)
@@ -597,7 +622,7 @@ class UserInteractionController extends Controller
         $giftsById = VirtualGift::whereIn('id', $giftIds)->get()->keyBy('id');
         $countByGift = $received->keyBy('gift_id');
 
-        $gifts = $received->map(function ($row) use ($giftsById, $countByGift) {
+        $all = $received->map(function ($row) use ($giftsById, $countByGift) {
             $gift = $giftsById->get($row->gift_id);
             if (!$gift) {
                 return null;
@@ -610,6 +635,8 @@ class UserInteractionController extends Controller
                 'rarity' => $gift->rarity ?? 'common',
             ];
         })->filter()->values()->all();
+        $total = count($all);
+        $gifts = array_slice($all, ($page - 1) * $limit, $limit);
 
         $totalGiftsCollected = (int) CoinTransaction::where('receiver_id', $id)
             ->where('transaction_type', CoinTransaction::TYPE_GIFT)
@@ -622,7 +649,7 @@ class UserInteractionController extends Controller
             'total_gifts_collected' => $totalGiftsCollected,
             'max_gifts_available' => $maxGiftsAvailable,
             'gifts' => $gifts,
-        ]);
+        ], ApiResponse::paginationMeta($total, $page, $limit));
     }
 
     /**

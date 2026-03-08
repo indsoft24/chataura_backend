@@ -4,29 +4,32 @@ namespace App\Http\Controllers;
 
 use App\Helpers\ApiResponse;
 use App\Models\User;
+use App\Services\ApiCacheService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
 class SpinController extends Controller
 {
     /**
-     * GET /api/v1/spin/prizes – current prize table (for dynamic display).
+     * GET /api/v1/spin/prizes – current prize table. Cached (short TTL).
      */
-    public function prizes(Request $request)
+    public function prizes(Request $request, ApiCacheService $cache)
     {
-        $prizes = collect(config('spin.prizes', []))->map(function ($p) {
+        $data = $cache->remember('spin_prizes', $cache->ttl('spin'), function () {
+            $prizes = collect(config('spin.prizes', []))->map(function ($p) {
+                return [
+                    'label' => $p['label'],
+                    'emoji' => $p['emoji'] ?? '🪙',
+                    'coins' => (int) ($p['coins'] ?? 0),
+                    'probability' => (float) ($p['probability'] ?? 0),
+                ];
+            })->values()->all();
             return [
-                'label' => $p['label'],
-                'emoji' => $p['emoji'] ?? '🪙',
-                'coins' => (int) ($p['coins'] ?? 0),
-                'probability' => (float) ($p['probability'] ?? 0),
+                'spin_cost' => (int) config('spin.spin_cost', 10),
+                'prizes' => $prizes,
             ];
-        })->values()->all();
-
-        return ApiResponse::success([
-            'spin_cost' => (int) config('spin.spin_cost', 10),
-            'prizes' => $prizes,
-        ]);
+        });
+        return ApiResponse::success($data);
     }
 
     /**

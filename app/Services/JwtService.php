@@ -117,8 +117,16 @@ class JwtService
     public function revokeRefreshToken(string $token): bool
     {
         $hashedToken = hash('sha256', $token);
-        
+
         return \App\Models\RefreshToken::where('token', $hashedToken)->delete() > 0;
+    }
+
+    /**
+     * Revoke all refresh tokens for a user (e.g. after password change to force re-login on other devices).
+     */
+    public function revokeAllRefreshTokensForUser(User $user): void
+    {
+        \App\Models\RefreshToken::where('user_id', $user->id)->delete();
     }
 }
 

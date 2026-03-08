@@ -105,7 +105,7 @@ class AuthController extends Controller
             \Log::error('Registration database error: ' . $e->getMessage());
             return ApiResponse::error('REGISTRATION_FAILED', config('app.debug') ? $e->getMessage() : 'Database error occurred', 500);
         } catch (\Exception $e) {
-            \Log::error('Registration error: ' . $e->getMessage(), ['trace' => $e->getTraceAsString()]);
+            \Log::error('Registration error: ' . $e->getMessage());
             return ApiResponse::error('REGISTRATION_FAILED', config('app.debug') ? $e->getMessage() : 'An error occurred during registration', 500);
         }
     }
@@ -312,7 +312,7 @@ class AuthController extends Controller
         }
 
         $otp = str_pad((string) random_int(0, 999999), 6, '0', STR_PAD_LEFT);
-        $cacheKey = 'email_otp:' . $user->id;
+        $cacheKey = 'email_otp:email_verification:' . $user->id;
         Cache::put($cacheKey, $otp, now()->addMinutes(15));
 
         try {
@@ -340,7 +340,7 @@ class AuthController extends Controller
         }
 
         $user = $request->user();
-        $cacheKey = 'email_otp:' . $user->id;
+        $cacheKey = 'email_otp:email_verification:' . $user->id;
         $storedOtp = Cache::get($cacheKey);
 
         if ($storedOtp === null || !hash_equals((string) $storedOtp, (string) $validated['otp'])) {
@@ -352,6 +352,206 @@ class AuthController extends Controller
         $user->save();
 
         return ApiResponse::success(null);
+    }
+
+    /**
+     * Forgot password: send 6-digit OTP to the given email (unauthenticated).
+     * POST /api/v1/auth/forgot-password
+     * Body: { "email": "user@example.com" }
+     * Rate-limit: max 3 requests per 10 minutes per email.
+     * Returns success even if email not found (prevent enumeration).
+     */
+    public function forgotPassword(Request $request)
+    {
+        try {
+            $validated = $request->validate([
+                'email' => 'required|email',
+            ]);
+        } catch (ValidationException $e) {
+            return ApiResponse::validationError('Validation failed', $e->errors());
+        }
+
+        $email = strtolower($validated['email']);
+        $rateKey = 'forgot_password_rate:' . $email;
+        $attempts = (int) Cache::get($rateKey, 0);
+        if ($attempts >= 3) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Too many attempts. Please try again in 10 minutes.',
+            ], 429);
+        }
+        Cache::put($rateKey, $attempts + 1, now()->addMinutes(10));
+
+        $user = User::where('email', $email)->first();
+        if (!$user) {
+            return response()->json([
+                'success' => true,
+                'message' => 'OTP sent to your email',
+            ]);
+        }
+
+        $otp = str_pad((string) random_int(0, 999999), 6, '0', STR_PAD_LEFT);
+        $otpKey = 'email_otp:forgot_password:' . $email;
+        Cache::put($otpKey, $otp, now()->addMinutes(10));
+
+        try {
+            Mail::to($user->email)->send(new EmailOtpMail($otp, config('app.name')));
+        } catch (\Throwable $e) {
+            \Log::error('Forgot password email failed: ' . $e->getMessage());
+            return ApiResponse::error('EMAIL_SEND_FAILED', 'Failed to send OTP email', 500);
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'OTP sent to your email',
+        ]);
+    }
+
+    /**
+     * Reset password with OTP (unauthenticated).
+     * POST /api/v1/auth/reset-password
+     * Body: { "email": "...", "otp": "123456", "password": "newPassword123" }
+     */
+    public function resetPassword(Request $request)
+    {
+        try {
+            $validated = $request->validate([
+                'email' => 'required|email',
+                'otp' => 'required|string|size:6',
+                'password' => 'required|string|min:6',
+            ]);
+        } catch (ValidationException $e) {
+            return ApiResponse::validationError('Validation failed', $e->errors());
+        }
+
+        $email = strtolower($validated['email']);
+        $otpKey = 'email_otp:forgot_password:' . $email;
+        $storedOtp = Cache::get($otpKey);
+
+        if ($storedOtp === null || !hash_equals((string) $storedOtp, (string) $validated['otp'])) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Invalid or expired OTP',
+            ], 400);
+        }
+
+        $user = User::where('email', $email)->first();
+        if (!$user) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Invalid or expired OTP',
+            ], 400);
+        }
+
+        $user->password = Hash::make($validated['password']);
+        $user->save();
+        Cache::forget($otpKey);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Password reset successfully',
+        ]);
+    }
+
+    /**
+     * Change password (step 1): verify current password and send OTP to registered email.
+     * POST /api/v1/auth/change-password/request (auth required)
+     * Body: { "current_password": "...", "new_password": "..." }
+     */
+    public function changePasswordRequest(Request $request)
+    {
+        try {
+            $validated = $request->validate([
+                'current_password' => 'required|string',
+                'new_password' => 'required|string|min:6',
+            ]);
+        } catch (ValidationException $e) {
+            return ApiResponse::validationError('Validation failed', $e->errors());
+        }
+
+        $user = $request->user();
+        if (!Hash::check($validated['current_password'], $user->password)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Current password is incorrect',
+            ], 400);
+        }
+
+        if (empty($user->email)) {
+            return ApiResponse::error('NO_EMAIL', 'User has no email address', 400);
+        }
+
+        $otp = str_pad((string) random_int(0, 999999), 6, '0', STR_PAD_LEFT);
+        $otpKey = 'email_otp:change_password:' . $user->id;
+        $pendingKey = 'change_password_pending:' . $user->id;
+        Cache::put($otpKey, $otp, now()->addMinutes(10));
+        Cache::put($pendingKey, Hash::make($validated['new_password']), now()->addMinutes(10));
+
+        try {
+            Mail::to($user->email)->send(new EmailOtpMail($otp, config('app.name')));
+        } catch (\Throwable $e) {
+            \Log::error('Change password OTP email failed: ' . $e->getMessage());
+            Cache::forget($otpKey);
+            Cache::forget($pendingKey);
+            return ApiResponse::error('EMAIL_SEND_FAILED', 'Failed to send OTP email', 500);
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'OTP sent to your registered email',
+        ]);
+    }
+
+    /**
+     * Change password (step 2): verify OTP and apply new password.
+     * POST /api/v1/auth/change-password/verify (auth required)
+     * Body: { "otp": "123456", "new_password": "newPass456" }
+     * Optionally invalidates all other refresh tokens (force re-login on other devices).
+     */
+    public function changePasswordVerify(Request $request)
+    {
+        try {
+            $validated = $request->validate([
+                'otp' => 'required|string|size:6',
+                'new_password' => 'required|string|min:6',
+            ]);
+        } catch (ValidationException $e) {
+            return ApiResponse::validationError('Validation failed', $e->errors());
+        }
+
+        $user = $request->user();
+        $otpKey = 'email_otp:change_password:' . $user->id;
+        $pendingKey = 'change_password_pending:' . $user->id;
+        $storedOtp = Cache::get($otpKey);
+        $pendingHash = Cache::get($pendingKey);
+
+        if ($storedOtp === null || !hash_equals((string) $storedOtp, (string) $validated['otp'])) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Invalid or expired OTP',
+            ], 400);
+        }
+
+        if ($pendingHash === null || !Hash::check($validated['new_password'], $pendingHash)) {
+            Cache::forget($otpKey);
+            Cache::forget($pendingKey);
+            return response()->json([
+                'success' => false,
+                'message' => 'Invalid or expired OTP',
+            ], 400);
+        }
+
+        $user->password = $pendingHash;
+        $user->save();
+        Cache::forget($otpKey);
+        Cache::forget($pendingKey);
+
+        $this->jwtService->revokeAllRefreshTokensForUser($user);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Password changed successfully',
+        ]);
     }
 
     /**

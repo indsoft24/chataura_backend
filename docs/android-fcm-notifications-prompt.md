@@ -89,7 +89,7 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
 
 - Use **data payload** only (backend sends high-priority data; no notification payload in payload when app must handle it).
 - For **incoming_call**, backend sends `channel_name` (and Agora `token`, `uid`). Use `channel_name`; support `channel` if your activity expects it.
-- For **new_message**, backend sends `conversation_id`, `sender_id`, `sender_name`, `message`, and optionally `message_id`, `message_type`.
+- For **new_message**, backend sends `conversation_id`, `sender_id`, `sender_name`, `message`, and optionally `message_id`, `msg_type` (FCM reserves `message_type`; type is sent as `msg_type`).
 
 ---
 

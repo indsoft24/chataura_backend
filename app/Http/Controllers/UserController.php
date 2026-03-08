@@ -180,17 +180,22 @@ class UserController extends Controller
     }
 
     /**
-     * GET /user/blocked-users - List blocked users (BlockedUserDto shape).
+     * GET /user/blocked-users - List blocked users. Paginated.
+     * Query: page (default 1), limit (default 20, max 50).
      */
     public function blockedUsers(Request $request)
     {
         $user = $request->user();
-        $list = BlockedUser::where('blocker_id', $user->id)->with('blocked')->get()->map(fn ($b) => [
+        $page = max(1, (int) $request->query('page', 1));
+        $limit = min(max(1, (int) $request->query('limit', 20)), 50);
+        $query = BlockedUser::where('blocker_id', $user->id)->with('blocked')->orderBy('created_at', 'desc');
+        $total = $query->count();
+        $list = $query->skip(($page - 1) * $limit)->take($limit)->get()->map(fn ($b) => [
             'id' => $b->blocked->id,
             'name' => $b->blocked->display_name ?? $b->blocked->name,
             'avatar_url' => $b->blocked->avatar_url,
-        ]);
-        return ApiResponse::success($list->values()->all());
+        ])->values()->all();
+        return ApiResponse::success($list, ApiResponse::paginationMeta($total, $page, $limit));
     }
 
     /**

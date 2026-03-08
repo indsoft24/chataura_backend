@@ -10,34 +10,38 @@ use App\Models\VirtualGift;
 use App\Models\WalletPackage;
 use App\Models\WalletTransaction;
 use App\Models\WithdrawalRequest;
+use App\Services\ApiCacheService;
 use App\Services\LevelService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
 use Razorpay\Api\Api;
 
 class WalletController extends Controller
 {
     public function __construct(
-        private LevelService $levelService
+        private LevelService $levelService,
+        private ApiCacheService $cache
     ) {}
+
     /**
-     * GET /api/v1/wallet/packages – active wallet packages.
+     * GET /api/v1/wallet/packages – active wallet packages. Cached.
      */
     public function packages()
     {
-        $packages = WalletPackage::where('is_active', true)
-            ->orderBy('price_in_inr')
-            ->get(['id', 'coin_amount', 'price_in_inr']);
-
-        return ApiResponse::success([
-            'packages' => $packages->map(fn ($p) => [
-                'id' => $p->id,
-                'coin_amount' => (int) $p->coin_amount,
-                'price_in_inr' => (float) $p->price_in_inr,
-            ]),
-        ]);
+        $data = $this->cache->remember('wallet_packages', $this->cache->ttl('catalog'), function () {
+            $packages = WalletPackage::where('is_active', true)
+                ->orderBy('price_in_inr')
+                ->get(['id', 'coin_amount', 'price_in_inr']);
+            return [
+                'packages' => $packages->map(fn ($p) => [
+                    'id' => $p->id,
+                    'coin_amount' => (int) $p->coin_amount,
+                    'price_in_inr' => (float) $p->price_in_inr,
+                ])->values()->all(),
+            ];
+        });
+        return ApiResponse::success($data);
     }
 
     /**
@@ -242,15 +246,15 @@ class WalletController extends Controller
     }
 
     /**
-     * GET /api/v1/wallet/transactions – unified list (UNION-style): wallet_transactions (recharges) + coin_transactions (calls/gifts).
-     * Table A: id = "recharge_" + id, type = "recharge", title = "Wallet Recharge", status from wallet_transactions.
-     * Table B: id = "coin_" + id, type = "call"|"gift", title e.g. "Video call with Alice" from coin_transactions.
-     * Sorted by created_at DESC.
+     * GET /api/v1/wallet/transactions – unified list (recharges + coin_transactions). Paginated.
+     * Query: page (default 1), limit (default 20, max 100). Sorted by created_at DESC.
      */
     public function transactions(Request $request)
     {
         $user = $request->user();
         $userId = $user->id;
+        $page = max(1, (int) $request->query('page', 1));
+        $limit = min(max(1, (int) $request->query('limit', 20)), 100);
 
         $walletTxns = WalletTransaction::where('user_id', $userId)->get();
         $coinTxns = CoinTransaction::where('sender_id', $userId)
@@ -273,7 +277,6 @@ class WalletController extends Controller
         }
 
         foreach ($coinTxns as $ct) {
-            // Caller already sees full deduction in the call row; skip commission row for caller to avoid double-count
             if ($ct->transaction_type === CoinTransaction::TYPE_CALL_COMMISSION && $ct->sender_id === $userId) {
                 continue;
             }
@@ -329,34 +332,39 @@ class WalletController extends Controller
             return ($b['_sort_ts'] ?? 0) <=> ($a['_sort_ts'] ?? 0);
         });
 
+        $total = count($list);
+        $list = array_slice($list, ($page - 1) * $limit, $limit);
         $transactions = array_map(function ($row) {
             unset($row['_sort_ts']);
             return $row;
         }, $list);
 
-        return ApiResponse::success([
-            'transactions' => array_values($transactions),
-        ]);
+        return ApiResponse::success(
+            ['transactions' => array_values($transactions)],
+            ApiResponse::paginationMeta($total, $page, $limit)
+        );
     }
 
     /**
-     * GET /api/v1/gifts – active virtual gifts (id, name, image_url, coin_cost).
+     * GET /api/v1/gifts – active virtual gifts. Cached.
      */
     public function gifts()
     {
-        $gifts = VirtualGift::where('is_active', true)
-            ->orderBy('coin_cost')
-            ->get(['id', 'name', 'image_url', 'animation_url', 'coin_cost']);
-
-        return ApiResponse::success([
-            'gifts' => $gifts->map(fn ($g) => [
-                'id' => (string) $g->id,
-                'name' => $g->name,
-                'coin_cost' => (int) $g->coin_cost,
-                'image_url' => $g->image_url,
-                'animation_url' => $g->animation_url,
-            ]),
-        ]);
+        $data = $this->cache->remember('wallet_gifts', $this->cache->ttl('catalog'), function () {
+            $gifts = VirtualGift::where('is_active', true)
+                ->orderBy('coin_cost')
+                ->get(['id', 'name', 'image_url', 'animation_url', 'coin_cost']);
+            return [
+                'gifts' => $gifts->map(fn ($g) => [
+                    'id' => (string) $g->id,
+                    'name' => $g->name,
+                    'coin_cost' => (int) $g->coin_cost,
+                    'image_url' => $g->image_url,
+                    'animation_url' => $g->animation_url,
+                ])->values()->all(),
+            ];
+        });
+        return ApiResponse::success($data);
     }
 
     /**
@@ -365,11 +373,6 @@ class WalletController extends Controller
      */
     public function sendGift(Request $request)
     {
-        Log::info('Wallet API hit: POST /wallet/send-gift', [
-            'when' => now()->toIso8601String(),
-            'user_id' => $request->user()?->id,
-            'body' => $request->only(['gift_id', 'receiver_id']),
-        ]);
         try {
             $validated = $request->validate([
                 'gift_id' => 'required|integer|exists:virtual_gifts,id',
@@ -382,7 +385,6 @@ class WalletController extends Controller
         $sender = $request->user();
         $receiverId = (int) $validated['receiver_id'];
         if ($receiverId === $sender->id) {
-            Log::info('Gift: no deduction — sender cannot send to self', ['sender_id' => $sender->id]);
             return ApiResponse::error('INVALID_REQUEST', 'Cannot send gift to yourself', 400);
         }
 
@@ -390,12 +392,6 @@ class WalletController extends Controller
         $cost = (int) $gift->coin_cost;
         $senderBalance = (int) $sender->wallet_balance;
         if ($senderBalance < $cost) {
-            Log::info('Gift: no deduction — insufficient balance', [
-                'sender_id' => $sender->id,
-                'gift_id' => $gift->id,
-                'cost' => $cost,
-                'sender_balance' => $senderBalance,
-            ]);
             return ApiResponse::error('INSUFFICIENT_BALANCE', 'Insufficient wallet balance', 400);
         }
 
@@ -429,20 +425,9 @@ class WalletController extends Controller
         $sender->refresh();
         $receiver->refresh();
 
-        // XP: award sender for sending a gift (activity)
         $xpPerGift = 5;
         $this->levelService->addXp($sender->id, $xpPerGift);
 
-        Log::info('Gift: wallet deduction applied', [
-            'gift_id' => $gift->id,
-            'gift_name' => $gift->name,
-            'sender_id' => $sender->id,
-            'receiver_id' => $receiver->id,
-            'cost' => $cost,
-            'admin_commission' => $adminCommission,
-            'net_to_receiver' => $netToReceiver,
-            'sender_balance_after' => (int) $sender->wallet_balance,
-        ]);
         return ApiResponse::success([
             'gift_id' => $gift->id,
             'coin_cost' => $cost,
@@ -452,8 +437,8 @@ class WalletController extends Controller
     }
 
     /**
-     * POST /api/v1/wallet/referral/convert – Convert referral_balance to gold coins (wallet).
-     * Auth required. In transaction: set referral_balance = 0, increment wallet by total_gold.
+     * POST /api/v1/wallet/referral/convert – Convert referral_balance to gold coins (wallet_balance).
+     * Auth required. Moves full referral_balance to wallet using referral_coin_conversion_rate (1:1 default).
      */
     public function referralConvert(Request $request)
     {
@@ -467,17 +452,26 @@ class WalletController extends Controller
         $rate = (int) ($settings->referral_coin_conversion_rate ?? 1);
         $totalGold = $referralBalance * $rate;
 
-        DB::transaction(function () use ($user, $totalGold) {
-            $user->referral_balance = 0;
-            $user->wallet_balance = (int) ($user->wallet_balance ?? 0) + $totalGold;
-            $user->save();
+        DB::transaction(function () use ($user, $rate) {
+            $u = User::where('id', $user->id)->lockForUpdate()->first();
+            if (!$u) {
+                throw new \RuntimeException('User not found');
+            }
+            $currentReferral = (int) ($u->referral_balance ?? 0);
+            if ($currentReferral <= 0) {
+                throw new \RuntimeException('NO_REFERRAL_BALANCE');
+            }
+            $coinsToAdd = $currentReferral * $rate;
+            $u->referral_balance = 0;
+            $u->wallet_balance = (int) ($u->wallet_balance ?? 0) + $coinsToAdd;
+            $u->save();
         });
 
         $user->refresh();
-        $coins = (int) ($user->wallet_balance ?? $user->coin_balance ?? 0);
         return ApiResponse::success([
-            'referral_balance' => (int) $user->referral_balance,
-            'coins' => $coins,
+            'referral_balance' => (int) ($user->referral_balance ?? 0),
+            'wallet_balance' => (int) ($user->wallet_balance ?? 0),
+            'coins' => (int) ($user->wallet_balance ?? $user->coin_balance ?? 0),
         ]);
     }
 
@@ -593,33 +587,36 @@ class WalletController extends Controller
     }
 
     /**
-     * GET /api/v1/wallet/withdrawals - List current user's withdrawal requests (latest first).
+     * GET /api/v1/wallet/withdrawals - List current user's withdrawal requests. Paginated.
+     * Query: page (default 1), limit (default 20, max 50).
      */
     public function withdrawals(Request $request)
     {
         $user = $request->user();
-        $list = WithdrawalRequest::where('user_id', $user->id)
-            ->orderBy('created_at', 'desc')
-            ->get()
-            ->map(fn (WithdrawalRequest $r) => [
-                'id' => $r->id,
-                'gems_amount' => (int) $r->gems_amount,
-                'payment_method' => $r->payment_method,
-                'payment_details' => $r->payment_details,
-                'ifsc_code' => $r->ifsc_code,
-                'full_name' => $r->full_name,
-                'bank_name' => $r->bank_name,
-                'bank_address' => $r->bank_address,
-                'swift_code' => $r->swift_code,
-                'country' => $r->country,
-                'is_international' => (bool) $r->is_international,
-                'status' => $r->status,
-                'created_at' => $r->created_at->toIso8601String(),
-                'admin_note' => $r->status !== WithdrawalRequest::STATUS_PENDING ? $r->admin_note : null,
-            ])
-            ->values()
-            ->all();
+        $page = max(1, (int) $request->query('page', 1));
+        $limit = min(max(1, (int) $request->query('limit', 20)), 50);
 
-        return ApiResponse::success($list);
+        $query = WithdrawalRequest::where('user_id', $user->id)->orderBy('created_at', 'desc');
+        $total = $query->count();
+        $items = $query->skip(($page - 1) * $limit)->take($limit)->get();
+
+        $list = $items->map(fn (WithdrawalRequest $r) => [
+            'id' => $r->id,
+            'gems_amount' => (int) $r->gems_amount,
+            'payment_method' => $r->payment_method,
+            'payment_details' => $r->payment_details,
+            'ifsc_code' => $r->ifsc_code,
+            'full_name' => $r->full_name,
+            'bank_name' => $r->bank_name,
+            'bank_address' => $r->bank_address,
+            'swift_code' => $r->swift_code,
+            'country' => $r->country,
+            'is_international' => (bool) $r->is_international,
+            'status' => $r->status,
+            'created_at' => $r->created_at->toIso8601String(),
+            'admin_note' => $r->status !== WithdrawalRequest::STATUS_PENDING ? $r->admin_note : null,
+        ])->values()->all();
+
+        return ApiResponse::success($list, ApiResponse::paginationMeta($total, $page, $limit));
     }
 }

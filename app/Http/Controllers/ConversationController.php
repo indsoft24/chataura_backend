@@ -11,11 +11,15 @@ use Illuminate\Http\Request;
 class ConversationController extends Controller
 {
     /**
-     * GET /conversations - List conversations for the authenticated user.
+     * GET /conversations - List conversations for the authenticated user. Paginated.
+     * Query: page (default 1), limit (default 20, max 50).
      */
     public function index(Request $request)
     {
         $user = $request->user();
+        $page = max(1, (int) $request->query('page', 1));
+        $limit = min(max(1, (int) $request->query('limit', 20)), 50);
+
         $participantIds = ConversationParticipant::where('user_id', $user->id)->pluck('conversation_id');
         $conversations = Conversation::whereIn('id', $participantIds)
             ->with(['participants.user', 'group'])
@@ -25,6 +29,9 @@ class ConversationController extends Controller
                 return $last ? $last->created_at->timestamp : 0;
             })
             ->values();
+
+        $total = $conversations->count();
+        $conversations = $conversations->slice(($page - 1) * $limit, $limit)->values();
 
         $list = $conversations->map(function (Conversation $c) use ($user) {
             $lastMessage = Message::where('conversation_id', $c->id)->latest('created_at')->first();
@@ -70,7 +77,7 @@ class ConversationController extends Controller
             ];
         });
 
-        return ApiResponse::success($list->values()->all());
+        return ApiResponse::success($list->values()->all(), ApiResponse::paginationMeta($total, $page, $limit));
     }
 
     /**

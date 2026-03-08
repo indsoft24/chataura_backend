@@ -3,35 +3,40 @@
 namespace App\Http\Controllers;
 
 use App\Helpers\ApiResponse;
+use App\Models\AdminSetting;
+use App\Models\ReferralHistory;
+use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
 class InviteController extends Controller
 {
     /**
-     * Get user's invite information.
+     * Get user's invite information. Reward amounts from AdminSetting.
+     * referral_balance is shown in /users/me and /user/profile.
      */
     public function me(Request $request)
     {
         $user = $request->user();
-
+        $settings = AdminSetting::get();
         $totalInvited = $user->invitedUsers()->count();
-        $totalEarnedCoins = $user->invitedUsers()->count() * 100; // 100 coins per invite (customize as needed)
+        $referrerReward = (int) $settings->referral_reward_referrer;
+        $refereeReward = (int) $settings->referral_reward_referee;
 
         return ApiResponse::success([
             'invite_code' => $user->invite_code,
             'invite_link' => config('app.url') . '/invite/' . $user->invite_code,
+            'referral_balance' => (int) ($user->referral_balance ?? 0),
             'reward_rules' => [
-                'inviter_reward' => 100, // coins
-                'referee_reward' => 50, // coins
+                'inviter_reward' => $referrerReward,
+                'referee_reward' => $refereeReward,
             ],
             'total_invited' => $totalInvited,
-            'total_earned_coins' => $totalEarnedCoins,
         ]);
     }
 
     /**
-     * Apply invite code (called after registration).
+     * Apply invite code (called after registration). Credits referral_balance for both referrer and referee.
      */
     public function apply(Request $request)
     {
@@ -42,39 +47,55 @@ class InviteController extends Controller
 
             $user = $request->user();
 
-            // Check if user already has an inviter
             if ($user->invited_by) {
                 return ApiResponse::error('ALREADY_INVITED', 'You have already used an invite code', 400);
             }
 
-            // Find inviter
-            $inviter = \App\Models\User::where('invite_code', $validated['invite_code'])->first();
+            $inviter = User::where('invite_code', $validated['invite_code'])->first();
 
-            if (!$inviter || $inviter->id === $user->id) {
+            if (!$inviter || (int) $inviter->id === (int) $user->id) {
                 return ApiResponse::error('INVALID_INVITE_CODE', 'Invalid invite code', 400);
             }
 
-            // Apply invite and rewards in one atomic transaction
-            DB::transaction(function () use ($user, $inviter) {
-                $inv = \App\Models\User::where('id', $inviter->id)->lockForUpdate()->first();
-                $u = \App\Models\User::where('id', $user->id)->lockForUpdate()->first();
+            $settings = AdminSetting::get();
+            $rewardReferrer = (int) $settings->referral_reward_referrer;
+            $rewardReferee = (int) $settings->referral_reward_referee;
+
+            DB::transaction(function () use ($user, $inviter, $rewardReferrer, $rewardReferee) {
+                $inv = User::where('id', $inviter->id)->lockForUpdate()->first();
+                $u = User::where('id', $user->id)->lockForUpdate()->first();
                 if (!$inv || !$u) {
                     throw new \RuntimeException('User not found');
+                }
+                if ($u->invited_by) {
+                    throw new \RuntimeException('ALREADY_INVITED');
                 }
                 $u->invited_by = $inv->id;
                 $u->save();
 
-                // Referral/invite rewards: Gold Coins only (wallet_balance), not Gems.
-                $inv->increment('wallet_balance', 100);
-                $u->increment('wallet_balance', 50);
+                $inv->increment('referral_balance', $rewardReferrer);
+                $u->increment('referral_balance', $rewardReferee);
+
+                ReferralHistory::create([
+                    'referrer_id' => $inv->id,
+                    'referee_id' => $u->id,
+                    'referrer_amount' => $rewardReferrer,
+                    'referee_amount' => $rewardReferee,
+                ]);
             });
 
             return ApiResponse::success([
                 'message' => 'Invite code applied successfully',
-                'reward_received' => 50,
+                'reward_received' => $rewardReferee,
+                'referral_balance' => (int) ($user->refresh()->referral_balance ?? 0),
             ]);
         } catch (\Illuminate\Validation\ValidationException $e) {
             return ApiResponse::validationError('Validation failed', $e->errors());
+        } catch (\RuntimeException $e) {
+            if ($e->getMessage() === 'ALREADY_INVITED') {
+                return ApiResponse::error('ALREADY_INVITED', 'You have already used an invite code', 400);
+            }
+            return ApiResponse::error('APPLY_INVITE_FAILED', $e->getMessage(), 500);
         } catch (\Exception $e) {
             return ApiResponse::error('APPLY_INVITE_FAILED', $e->getMessage(), 500);
         }

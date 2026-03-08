@@ -14,17 +14,22 @@ use Illuminate\Validation\ValidationException;
 class ContactController extends Controller
 {
     /**
-     * GET /contacts/friends - List friends with optional conversation_id.
+     * GET /contacts/friends - List friends. Paginated.
+     * Query: page (default 1), limit (default 50, max 100).
      */
     public function friends(Request $request)
     {
         $user = $request->user();
-        $friendships = Friendship::where('status', Friendship::STATUS_ACCEPTED)
+        $page = max(1, (int) $request->query('page', 1));
+        $limit = min(max(1, (int) $request->query('limit', 50)), 100);
+        $query = Friendship::where('status', Friendship::STATUS_ACCEPTED)
             ->where(function ($q) use ($user) {
                 $q->where('user_id', $user->id)->orWhere('friend_id', $user->id);
             })
             ->with(['user', 'friend'])
-            ->get();
+            ->orderBy('created_at', 'desc');
+        $total = $query->count();
+        $friendships = $query->skip(($page - 1) * $limit)->take($limit)->get();
         $viewerId = (int) $user->id;
         $list = $friendships->map(function ($f) use ($user, $viewerId) {
             $friend = $f->user_id === $user->id ? $f->friend : $f->user;
@@ -41,19 +46,24 @@ class ContactController extends Controller
                 'conversation_id' => $conversationId,
             ];
         });
-        return ApiResponse::success($list->values()->all());
+        return ApiResponse::success($list->values()->all(), \App\Helpers\ApiResponse::paginationMeta($total, $page, $limit));
     }
 
     /**
-     * GET /contacts/groups - List groups the user is a member of.
+     * GET /contacts/groups - List groups the user is a member of. Paginated.
+     * Query: page (default 1), limit (default 50, max 100).
      */
     public function groups(Request $request)
     {
         $user = $request->user();
+        $page = max(1, (int) $request->query('page', 1));
+        $limit = min(max(1, (int) $request->query('limit', 50)), 100);
         $myConvIds = ConversationParticipant::where('user_id', $user->id)->pluck('conversation_id');
         $groupConversations = Conversation::where('type', 'group')->whereIn('id', $myConvIds)->with('group')->get();
         $groupIds = $groupConversations->pluck('group_id')->filter()->unique()->values();
-        $groups = ChatGroup::whereIn('id', $groupIds)->with('conversation')->get();
+        $query = ChatGroup::whereIn('id', $groupIds)->with('conversation');
+        $total = $query->count();
+        $groups = $query->skip(($page - 1) * $limit)->take($limit)->get();
         $list = $groups->map(function (ChatGroup $g) {
             $conv = $g->conversation;
             return [
@@ -65,7 +75,7 @@ class ContactController extends Controller
                 'conversation_id' => $conv?->id,
             ];
         });
-        return ApiResponse::success($list->values()->all());
+        return ApiResponse::success($list->values()->all(), \App\Helpers\ApiResponse::paginationMeta($total, $page, $limit));
     }
 
     /**

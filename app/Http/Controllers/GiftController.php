@@ -6,8 +6,8 @@ use App\Helpers\ApiResponse;
 use App\Models\AdminSetting;
 use App\Models\GiftType;
 use App\Models\Room;
-use App\Models\Transaction;
 use App\Models\VirtualGift;
+use App\Services\ApiCacheService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -15,38 +15,40 @@ use Illuminate\Validation\ValidationException;
 class GiftController extends Controller
 {
     /**
-     * GET /api/v1/gift-types – list gift types (room catalog). Falls back to virtual_gifts when no active gift_types (same catalog as 1-1 chat).
+     * GET /api/v1/gift-types – list gift types (room catalog). Cached.
      */
-    public function index()
+    public function index(ApiCacheService $cache)
     {
-        $gifts = GiftType::where('is_active', true)
-            ->orderBy('coin_price')
-            ->get(['id', 'name', 'coin_price', 'image_url', 'animation_url']);
+        $data = $cache->remember('gift_types', $cache->ttl('catalog'), function () {
+            $gifts = GiftType::where('is_active', true)
+                ->orderBy('coin_price')
+                ->get(['id', 'name', 'coin_price', 'image_url', 'animation_url']);
 
-        if ($gifts->isEmpty()) {
-            $gifts = VirtualGift::where('is_active', true)
-                ->orderBy('coin_cost')
-                ->get(['id', 'name', 'image_url', 'animation_url', 'coin_cost']);
-            return ApiResponse::success([
+            if ($gifts->isEmpty()) {
+                $gifts = VirtualGift::where('is_active', true)
+                    ->orderBy('coin_cost')
+                    ->get(['id', 'name', 'image_url', 'animation_url', 'coin_cost']);
+                return [
+                    'gifts' => $gifts->map(fn ($g) => [
+                        'id' => (string) $g->id,
+                        'name' => $g->name,
+                        'coin_cost' => (int) $g->coin_cost,
+                        'image_url' => $g->image_url,
+                        'animation_url' => $g->animation_url,
+                    ])->values()->all(),
+                ];
+            }
+            return [
                 'gifts' => $gifts->map(fn ($g) => [
                     'id' => (string) $g->id,
                     'name' => $g->name,
-                    'coin_cost' => (int) $g->coin_cost,
+                    'coin_cost' => (int) $g->coin_price,
                     'image_url' => $g->image_url,
                     'animation_url' => $g->animation_url,
                 ])->values()->all(),
-            ]);
-        }
-
-        return ApiResponse::success([
-            'gifts' => $gifts->map(fn ($g) => [
-                'id' => (string) $g->id,
-                'name' => $g->name,
-                'coin_cost' => (int) $g->coin_price,
-                'image_url' => $g->image_url,
-                'animation_url' => $g->animation_url,
-            ])->values()->all(),
-        ]);
+            ];
+        });
+        return ApiResponse::success($data);
     }
 
     /**

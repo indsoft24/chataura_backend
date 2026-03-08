@@ -9,6 +9,7 @@ use App\Models\Room;
 use App\Models\RoomMember;
 use App\Models\RoomTheme;
 use App\Models\User;
+use App\Services\ApiCacheService;
 use App\Services\AgoraService;
 use App\Services\DestroyRoomService;
 use App\Services\HostTransferService;
@@ -26,26 +27,29 @@ class RoomController extends Controller
         private RoomService $roomService,
         private HostTransferService $hostTransfer,
         private DestroyRoomService $destroyRoom,
-        private LevelService $levelService
+        private LevelService $levelService,
+        private ApiCacheService $cache
     ) {}
 
     /**
-     * GET /api/v1/rooms/themes – list active room themes (dynamic from admin).
+     * GET /api/v1/rooms/themes – list active room themes. Cached.
      */
     public function themes()
     {
-        $themes = RoomTheme::where('is_active', true)
-            ->orderBy('name')
-            ->get(['id', 'name', 'type', 'media_url']);
-
-        return ApiResponse::success(
-            $themes->map(fn ($t) => [
-                'id' => $t->id,
-                'name' => $t->name,
-                'type' => $t->type,
-                'media_url' => $t->media_url,
-            ])->values()->all()
-        );
+        $data = $this->cache->remember('room_themes', $this->cache->ttl('catalog'), function () {
+            return RoomTheme::where('is_active', true)
+                ->orderBy('name')
+                ->get(['id', 'name', 'type', 'media_url'])
+                ->map(fn ($t) => [
+                    'id' => $t->id,
+                    'name' => $t->name,
+                    'type' => $t->type,
+                    'media_url' => $t->media_url,
+                ])
+                ->values()
+                ->all();
+        });
+        return ApiResponse::success($data);
     }
 
     /**
@@ -131,7 +135,7 @@ class RoomController extends Controller
      */
     public function show(Request $request, string $roomId)
     {
-        $room = Room::with(['owner', 'host', 'seats.user', 'theme'])
+        $room = Room::with(['owner', 'host', 'coHost', 'seats.user', 'theme'])
             ->where(function ($q) use ($roomId) {
                 $q->where('id', $roomId)->orWhere('display_id', $roomId);
             })
@@ -183,7 +187,7 @@ class RoomController extends Controller
         $friends = $request->boolean('friends');
         $user = $request->user();
 
-        $query = Room::with(['owner', 'host'])
+        $query = Room::with(['owner', 'host', 'coHost'])
             ->where('is_live', true)
             ->where('status', Room::STATUS_ACTIVE)
             ->whereNull('deleted_at');
@@ -247,6 +251,11 @@ class RoomController extends Controller
                         'display_name' => $room->host->display_name,
                         'avatar_url' => $room->host->avatar_url,
                     ] : null,
+                    'co_host' => $room->coHost ? [
+                        'id' => $room->coHost->id,
+                        'display_name' => $room->coHost->display_name,
+                        'avatar_url' => $room->coHost->avatar_url,
+                    ] : null,
                     'members_count' => $room->activeMembers()->count(),
                     'max_seats' => $room->max_seats,
                     'is_live' => $room->is_live,
@@ -260,19 +269,26 @@ class RoomController extends Controller
 
     /**
      * Update a room (owner only).
+     * Accepts cover_image_url from POST /upload response (data.url); persists and returns it in GET /rooms.
      */
     public function update(Request $request, string $roomId)
     {
         try {
-            $room = Room::find($roomId);
+            $room = Room::findByIdOrDisplayId($roomId);
 
             if (!$room || $room->trashed()) {
                 return ApiResponse::notFound('Room not found');
             }
 
-        if (!$this->roomService->isHost($room, $request->user()->id)) {
-            return ApiResponse::forbidden('Only room host can update the room');
-        }
+            if (!$this->roomService->isHost($room, $request->user()->id)) {
+                return ApiResponse::forbidden('Only room host can update the room');
+            }
+
+            // Normalize empty cover_image_url so validation passes (nullable|url)
+            $coverUrl = $request->input('cover_image_url');
+            if ($coverUrl !== null && trim((string) $coverUrl) === '') {
+                $request->merge(['cover_image_url' => null]);
+            }
 
             $validated = $request->validate([
                 'title' => 'nullable|string|max:255',
@@ -291,6 +307,7 @@ class RoomController extends Controller
 
             $room->fill($validated);
             $room->save();
+            $room->refresh();
 
             if (isset($validated['max_seats'])) {
                 $currentSeats = $room->seats()->count();
@@ -310,7 +327,10 @@ class RoomController extends Controller
                 }
             }
 
-            return ApiResponse::success($room->load('owner'));
+            $room->load('owner');
+            $payload = $room->toArray();
+            $payload['cover_image_url'] = $room->cover_image_url;
+            return ApiResponse::success($payload);
         } catch (ValidationException $e) {
             return ApiResponse::validationError('Validation failed', $e->errors());
         } catch (\Exception $e) {
@@ -362,7 +382,7 @@ class RoomController extends Controller
             if ($existingMember) {
                 $agoraUid = $this->agoraService->generateUid();
                 $agoraToken = $this->agoraService->generateRtcToken($room, $agoraUid);
-                $roomPayload = $this->roomWithHost($room->load(['owner', 'host', 'theme']));
+                $roomPayload = $this->roomWithHost($room->load(['owner', 'host', 'coHost', 'theme']));
                 return ApiResponse::success([
                     'room' => $roomPayload,
                     'member' => $this->formatMemberForJoinResponse($room, $existingMember),
@@ -398,7 +418,7 @@ class RoomController extends Controller
 
             $agoraUid = $this->agoraService->generateUid();
             $agoraToken = $this->agoraService->generateRtcToken($room, $agoraUid);
-            $roomPayload = $this->roomWithHost($room->load(['owner', 'host', 'theme']));
+            $roomPayload = $this->roomWithHost($room->load(['owner', 'host', 'coHost', 'theme']));
             return ApiResponse::success([
                 'room' => $roomPayload,
                 'member' => $this->formatMemberForJoinResponse($room, $member),
@@ -484,32 +504,86 @@ class RoomController extends Controller
 
         event(new RoomMemberLeft($room->fresh(), $member));
 
+        $room = $room->fresh();
         if ($wasHost) {
-            $transferred = $this->hostTransfer->transferOnHostLeave($room->fresh());
+            $transferred = $this->hostTransfer->transferOnHostLeave($room);
             if (!$transferred) {
-                $this->destroyRoom->endRoom($room->fresh());
+                // Only destroy room when host disconnects and room is completely empty
+                $activeCount = RoomMember::where('room_id', $room->id)->where('is_active', true)->count();
+                if ($activeCount === 0) {
+                    $this->destroyRoom->endRoom($room);
+                }
             }
-        } elseif ($this->roomService->shouldEndRoom($room->fresh())) {
-            $this->destroyRoom->endRoom($room->fresh());
+        } elseif ($this->roomService->shouldEndRoom($room)) {
+            $this->destroyRoom->endRoom($room);
         }
 
         return ApiResponse::success(['message' => 'Left room successfully']);
     }
 
     /**
-     * Transfer host to another user (current host only). Old host is demoted to audience (listener).
-     * Body: new_host_user_id (or user_id for backward compatibility).
+     * Promote a seated member to co-host. Host only. Emits room_role_updated for UI privileges.
+     * POST /api/v1/rooms/{roomId}/co-host — Body: { "target_uid": 12345 }
+     */
+    public function promoteToCoHost(Request $request, string $roomId)
+    {
+        try {
+            $validated = $request->validate([
+                'target_uid' => 'required|integer',
+            ]);
+            $targetUid = (int) $validated['target_uid'];
+
+            $room = Room::find($roomId);
+            if (!$room || $room->trashed() || !$room->isActive()) {
+                return ApiResponse::notFound('Room not found or closed');
+            }
+
+            $caller = $request->user();
+            if (!$this->roomService->isHost($room, $caller->id)) {
+                return ApiResponse::forbidden('Only current host can promote to co-host');
+            }
+            if ($targetUid === $caller->id) {
+                return ApiResponse::error('INVALID_TARGET', 'Cannot promote yourself to co-host', 400);
+            }
+
+            try {
+                $this->hostTransfer->setCoHost($room, $caller->id, $targetUid);
+            } catch (\RuntimeException $e) {
+                return ApiResponse::error('PROMOTE_CO_HOST_FAILED', $e->getMessage(), 400);
+            }
+
+            $room->refresh();
+            $targetUser = User::find($targetUid);
+            return ApiResponse::success([
+                'message' => 'Co-host assigned successfully',
+                'co_host' => $targetUser ? [
+                    'id' => $targetUser->id,
+                    'display_name' => $targetUser->display_name,
+                    'avatar_url' => $targetUser->avatar_url,
+                ] : null,
+            ]);
+        } catch (ValidationException $e) {
+            return ApiResponse::validationError('Validation failed', $e->errors());
+        } catch (\Exception $e) {
+            return ApiResponse::error('PROMOTE_CO_HOST_FAILED', $e->getMessage(), 500);
+        }
+    }
+
+    /**
+     * Transfer host to another user (current host only). Target must be seated. Old host becomes seated member (speaker).
+     * Body: { "target_uid": 12345 } or new_host_user_id / user_id for backward compatibility.
      */
     public function transferHost(Request $request, string $roomId)
     {
         try {
             $validated = $request->validate([
+                'target_uid' => 'nullable|integer',
                 'new_host_user_id' => 'nullable|integer',
                 'user_id' => 'nullable|integer',
             ]);
-            $newHostUserId = (int) ($validated['new_host_user_id'] ?? $validated['user_id'] ?? 0);
+            $newHostUserId = (int) ($validated['target_uid'] ?? $validated['new_host_user_id'] ?? $validated['user_id'] ?? 0);
             if ($newHostUserId < 1) {
-                return ApiResponse::validationError('Validation failed', ['new_host_user_id' => ['The new host user id is required.']]);
+                return ApiResponse::validationError('Validation failed', ['target_uid' => ['The target user id is required.']]);
             }
 
             $room = Room::find($roomId);
@@ -624,13 +698,14 @@ class RoomController extends Controller
     }
 
     /**
-     * Room payload with owner, host, and theme for join/state response.
+     * Room payload with owner, host, optional co_host, and theme for join/state response.
      * Includes active theme (id, name, type, media_url) so clients (e.g. late joiners) see current background.
      */
     private function roomWithHost(Room $room): array
     {
         $data = $room->toArray();
         $data['host'] = $this->formatHostForResponse($room->getCurrentHostUser());
+        $data['co_host'] = $this->formatHostForResponse($room->coHost);
         $data['theme'] = $room->theme ? [
             'id' => $room->theme->id,
             'name' => $room->theme->name,

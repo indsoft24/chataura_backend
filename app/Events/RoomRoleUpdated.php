@@ -3,25 +3,25 @@
 namespace App\Events;
 
 use App\Models\Room;
-use App\Models\User;
+use App\Models\RoomMember;
 use Illuminate\Broadcasting\InteractsWithSockets;
 use Illuminate\Foundation\Events\Dispatchable;
 use Illuminate\Queue\SerializesModels;
 
-class RoomHostChanged
+class RoomRoleUpdated
 {
     use Dispatchable, InteractsWithSockets, SerializesModels;
 
     public function __construct(
         public Room $room,
-        public ?User $newHost
+        public RoomMember $member
     ) {}
 
     /**
-     * Event name for broadcasting so clients can sync (room_host_changed).
+     * Event name for broadcasting so frontend can update UI privileges (e.g. co-host can manage seats, themes, music).
      */
     public function broadcastAs(): string
     {
-        return 'room_host_changed';
+        return 'room_role_updated';
     }
 }

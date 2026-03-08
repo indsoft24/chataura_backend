@@ -39,7 +39,6 @@ class FirebaseCallService
     {
         $tokens = $this->getTokensForUser($userId);
         if (empty($tokens)) {
-            Log::debug('FirebaseCallService: No FCM tokens for user', ['user_id' => $userId]);
             return false;
         }
 
@@ -78,10 +77,6 @@ class FirebaseCallService
                 ->withData($data)
                 ->withAndroidConfig(['priority' => 'high']);
             $messaging->send($message);
-            Log::info('FirebaseCallService: Incoming call sent', [
-                'call_id' => $data['call_id'] ?? '',
-                'token_preview' => substr($deviceToken, 0, 20) . '...',
-            ]);
             return true;
         } catch (MessagingException $e) {
             Log::error('FirebaseCallService: MessagingException: ' . $e->getMessage());
@@ -127,7 +122,6 @@ class FirebaseCallService
     {
         $tokens = $this->getTokensForUser($userId);
         if (empty($tokens)) {
-            Log::debug('FirebaseCallService: No FCM tokens for user (call_ended)', ['user_id' => $userId]);
             return false;
         }
         $sent = false;
@@ -147,7 +141,6 @@ class FirebaseCallService
     {
         $tokens = $this->getTokensForUser($userId);
         if (empty($tokens)) {
-            Log::debug('FirebaseCallService: No FCM tokens for user', ['user_id' => $userId]);
             return false;
         }
 
@@ -161,8 +154,9 @@ class FirebaseCallService
         if (!empty($messageData['id'])) {
             $data['message_id'] = (string) $messageData['id'];
         }
+        // FCM reserves "message_type" — use msg_type in data payload
         if (isset($messageData['message_type'])) {
-            $data['message_type'] = (string) $messageData['message_type'];
+            $data['msg_type'] = (string) $messageData['message_type'];
         }
 
         $title = $messageData['sender_name'] ?? 'New message';

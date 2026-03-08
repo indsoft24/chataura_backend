@@ -19,6 +19,7 @@ class Room extends Model
         'title',
         'owner_id',
         'host_id',
+        'co_host_id',
         'agora_channel_name',
         'agora_channel_uid',
         'max_seats',
@@ -66,6 +67,14 @@ class Room extends Model
     public function host()
     {
         return $this->belongsTo(User::class, 'host_id');
+    }
+
+    /**
+     * Get the optional co-host of the room.
+     */
+    public function coHost()
+    {
+        return $this->belongsTo(User::class, 'co_host_id');
     }
 
     /**

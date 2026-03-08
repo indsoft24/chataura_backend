@@ -123,4 +123,16 @@ return [
         'store' => env('APP_MAINTENANCE_STORE', 'database'),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | App Download URL
+    |--------------------------------------------------------------------------
+    |
+    | Google Play store URL (or direct APK link) for the Chat Aura Android app.
+    | Used on the landing page "Download" button. Set APP_DOWNLOAD_URL in .env.
+    |
+    */
+
+    'app_download_url' => env('APP_DOWNLOAD_URL', ''),
+
 ];

@@ -19,8 +19,9 @@ class MessageController extends Controller
     ) {}
 
     /**
-     * GET /messages/{conversation_id} - List messages ordered by created_at ASC.
-     * Includes sender_id, sender_name, sender_avatar and message_type, message_text, message_media, status.
+     * GET /messages/{conversation_id} - List messages, newest first. Paginated.
+     * Query: page (default 1), limit (default 20, max 100).
+     * Includes sender_id, sender_name, sender_avatar, message_type, message_text, message_media, status.
      */
     public function index(Request $request, int $conversation_id)
     {
@@ -29,10 +30,18 @@ class MessageController extends Controller
         if (!$participant) {
             return ApiResponse::forbidden('Not a participant of this conversation');
         }
-        $messages = Message::where('conversation_id', $conversation_id)
-            ->with('sender')
-            ->orderBy('created_at', 'asc')
-            ->get();
+        $page = max(1, (int) $request->query('page', 1));
+        $limit = min(max(1, (int) $request->query('limit', 20)), 100);
+
+        $query = Message::where('conversation_id', $conversation_id)->with('sender');
+        $total = $query->count();
+        $messages = $query->orderBy('created_at', 'desc')
+            ->skip(($page - 1) * $limit)
+            ->take($limit)
+            ->get()
+            ->sortBy('created_at')
+            ->values();
+
         $list = $messages->map(function (Message $m) {
             $sender = $m->sender;
             $row = [
@@ -52,7 +61,8 @@ class MessageController extends Controller
             $row['image_url'] = $row['message_media'];
             return $row;
         });
-        return ApiResponse::success($list->values()->all());
+
+        return ApiResponse::success($list->values()->all(), ApiResponse::paginationMeta($total, $page, $limit));
     }
 
     /**
