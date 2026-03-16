@@ -3,9 +3,15 @@
 namespace App\Providers;
 
 use App\Firebase\FirebaseProjectManager;
+use Illuminate\Filesystem\FilesystemAdapter;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Mail\MailManager;
 use Illuminate\Support\ServiceProvider;
 use Kreait\Laravel\Firebase\FirebaseProjectManager as KreaitFirebaseProjectManager;
+use League\Flysystem\Filesystem;
+use PlatformCommunity\Flysystem\BunnyCDN\BunnyCDNAdapter;
+use PlatformCommunity\Flysystem\BunnyCDN\BunnyCDNClient;
+use PlatformCommunity\Flysystem\BunnyCDN\BunnyCDNRegion;
 use Symfony\Component\Mailer\Transport\Smtp\Stream\SocketStream;
 
 class AppServiceProvider extends ServiceProvider
@@ -25,6 +31,19 @@ class AppServiceProvider extends ServiceProvider
     public function boot(): void
     {
         date_default_timezone_set(config('app.timezone'));
+
+        Storage::extend('bunnycdn', function ($app, $config) {
+            $region = $config['region'] ?? BunnyCDNRegion::DEFAULT;
+            $client = new BunnyCDNClient(
+                $config['storage_zone'],
+                $config['api_key'],
+                $region === '' ? BunnyCDNRegion::DEFAULT : $region
+            );
+            $adapter = new BunnyCDNAdapter($client, $config['pull_zone'] ?? '');
+            $flysystem = new Filesystem($adapter);
+
+            return new FilesystemAdapter($flysystem, $adapter, $config);
+        });
 
         // Apply config/mail.php "stream.ssl" (e.g. cafile) to SMTP transport; Laravel does not pass it by default.
         $this->app->make(MailManager::class)->extend('smtp', function ($config) {

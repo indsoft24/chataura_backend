@@ -135,6 +135,10 @@ class AuthController extends Controller
                 return ApiResponse::error('INVALID_CREDENTIALS', 'Invalid phone/email or password', 401);
             }
 
+            if ($user->isSuspended()) {
+                return ApiResponse::error('ACCOUNT_SUSPENDED', 'Your account has been suspended.', 403);
+            }
+
             $accessToken = $this->jwtService->generateAccessToken($user);
             $refreshToken = $this->jwtService->generateRefreshToken($user);
 
@@ -165,6 +169,10 @@ class AuthController extends Controller
 
             if (!$user) {
                 return ApiResponse::error('INVALID_REFRESH_TOKEN', 'Invalid or expired refresh token', 401);
+            }
+
+            if ($user->isSuspended()) {
+                return ApiResponse::error('ACCOUNT_SUSPENDED', 'Your account has been suspended.', 403);
             }
 
             $accessToken = $this->jwtService->generateAccessToken($user);
@@ -245,6 +253,10 @@ class AuthController extends Controller
             if ($updated) {
                 $user->save();
             }
+        }
+
+        if ($user->isSuspended()) {
+            return ApiResponse::error('ACCOUNT_SUSPENDED', 'Your account has been suspended.', 403);
         }
 
         $accessToken = $this->jwtService->generateAccessToken($user);

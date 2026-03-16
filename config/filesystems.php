@@ -60,6 +60,16 @@ return [
             'report' => false,
         ],
 
+        'bunnycdn' => [
+            'driver' => 'bunnycdn',
+            'storage_zone' => env('BUNNYCDN_STORAGE_ZONE', env('BUNNY_STORAGE_ZONE')),
+            'api_key' => env('BUNNYCDN_API_KEY', env('BUNNY_STORAGE_API_KEY')),
+            // Default to the same Bunny region used by the direct upload service.
+            // An empty region falls back to storage.bunnycdn.com, which 401s for zoned storage accounts.
+            'region' => env('BUNNYCDN_REGION', env('BUNNY_STORAGE_REGION', 'la')),
+            'pull_zone' => rtrim(env('BUNNYCDN_PULL_ZONE', env('BUNNY_CDN_URL', '')), '/'),
+        ],
+
     ],
 
     /*

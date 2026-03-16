@@ -144,12 +144,14 @@ return [
 
     'redis' => [
 
-        'client' => env('REDIS_CLIENT', 'phpredis'),
+        'client' => (env('REDIS_CLIENT') === 'phpredis' && !class_exists(\Redis::class))
+            ? 'predis'
+            : env('REDIS_CLIENT', class_exists(\Redis::class) ? 'phpredis' : 'predis'),
 
         'options' => [
             'cluster' => env('REDIS_CLUSTER', 'redis'),
             'prefix' => env('REDIS_PREFIX', Str::slug((string) env('APP_NAME', 'laravel')).'-database-'),
-            'persistent' => env('REDIS_PERSISTENT', false),
+            'persistent' => env('REDIS_PERSISTENT', true),
         ],
 
         'default' => [

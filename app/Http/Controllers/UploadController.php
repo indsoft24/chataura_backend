@@ -3,17 +3,21 @@
 namespace App\Http\Controllers;
 
 use App\Helpers\ApiResponse;
+use App\Services\BunnyStorageService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
 class UploadController extends Controller
 {
+    public function __construct(
+        private BunnyStorageService $bunny
+    ) {}
+
     /**
      * POST /upload - General image upload (e.g. room cover).
      * Content-Type: multipart/form-data. Body: file (required).
-     * Saves to storage/app/public/uploads (persistent). Returns public URL for cover_image_url.
-     * Ensure php artisan storage:link has been run so /storage/* is publicly accessible.
+     * Stores on BunnyCDN (same path as reels/posts) and returns the full CDN URL.
      */
     public function upload(Request $request)
     {
@@ -26,12 +30,15 @@ class UploadController extends Controller
         }
 
         $file = $request->file('file');
-        $ext = $file->getClientOriginalExtension() ?: 'jpg';
-        $name = Str::ulid() . '.' . strtolower($ext);
-        $path = $file->storeAs('uploads', $name, 'public');
+        $ext = strtolower($file->getClientOriginalExtension() ?: 'jpg');
+        $name = (string) Str::ulid() . '.' . $ext;
+        $path = 'uploads/' . $name;
 
-        $baseUrl = rtrim(config('app.url'), '/');
-        $url = $baseUrl . '/storage/' . ltrim($path, '/');
+        try {
+            $url = $this->bunny->uploadImage($file, $path);
+        } catch (\Throwable $e) {
+            return ApiResponse::error('UPLOAD_FAILED', 'Failed to store file on CDN: ' . $e->getMessage(), 500);
+        }
 
         return ApiResponse::success(['url' => $url]);
     }

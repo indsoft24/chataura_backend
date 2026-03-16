@@ -14,13 +14,14 @@ class FaqController extends Controller
      */
     public function index(Request $request, ApiCacheService $cache)
     {
-        $data = $cache->remember('faq', $cache->ttl('static'), function () {
+        $ttl = $cache->ttl('static');
+        $data = $cache->remember($cache->versionedKey('faq'), $ttl, function () {
             return FaqItem::orderBy('sort_order')->orderBy('id')->get()->map(fn ($f) => [
                 'id' => $f->id,
                 'question' => $f->question,
                 'answer' => $f->answer,
             ])->values()->all();
         });
-        return ApiResponse::success($data);
+        return $cache->applyHttpCacheHeaders($request, ApiResponse::success($data), $ttl, 'public');
     }
 }

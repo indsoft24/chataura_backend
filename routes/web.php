@@ -56,6 +56,9 @@ Route::prefix('admin')->name('admin.')->group(function () {
         Route::post('users', [AdminUserController::class, 'store'])->name('users.store');
         Route::delete('users/{user}', [AdminUserController::class, 'destroy'])->name('users.destroy');
         Route::post('users/add-credit', [AdminUserController::class, 'addCredit'])->name('users.add-credit');
+        Route::get('users/{user}/suspend', [AdminUserController::class, 'showSuspendForm'])->name('users.suspend-form');
+        Route::post('users/{user}/suspend', [AdminUserController::class, 'suspend'])->name('users.suspend');
+        Route::post('users/{user}/unsuspend', [AdminUserController::class, 'unsuspend'])->name('users.unsuspend');
 
         Route::get('withdrawals', [AdminWithdrawalRequestController::class, 'index'])->name('withdrawals.index');
         Route::get('withdrawals/{withdrawal}/approve', [AdminWithdrawalRequestController::class, 'showApproveForm'])->name('withdrawals.approve-form');

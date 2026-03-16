@@ -22,8 +22,7 @@ class ContactController extends Controller
         $user = $request->user();
         $page = max(1, (int) $request->query('page', 1));
         $limit = min(max(1, (int) $request->query('limit', 50)), 100);
-        $query = Friendship::where('status', Friendship::STATUS_ACCEPTED)
-            ->where(function ($q) use ($user) {
+        $query = Friendship::where(function ($q) use ($user) {
                 $q->where('user_id', $user->id)->orWhere('friend_id', $user->id);
             })
             ->with(['user', 'friend'])
@@ -111,23 +110,18 @@ class ContactController extends Controller
         if ($friendId === $user->id) {
             return ApiResponse::error('INVALID_REQUEST', 'Cannot add yourself', 400);
         }
-        $existing = Friendship::where(function ($q) use ($user, $friendId) {
+        $existingFriendship = Friendship::where(function ($q) use ($user, $friendId) {
             $q->where('user_id', $user->id)->where('friend_id', $friendId);
         })->orWhere(function ($q) use ($user, $friendId) {
             $q->where('user_id', $friendId)->where('friend_id', $user->id);
         })->first();
-        if ($existing) {
-            if ($existing->status === Friendship::STATUS_ACCEPTED) {
-                return ApiResponse::error('ALREADY_FRIENDS', 'Already friends', 400);
-            }
-            return ApiResponse::error('PENDING', 'Friend request already sent', 400);
+        if ($existingFriendship) {
+            return ApiResponse::error('ALREADY_FRIENDS', 'Already friends', 400);
         }
-        Friendship::create([
-            'user_id' => $user->id,
-            'friend_id' => $friendId,
-            'status' => Friendship::STATUS_PENDING,
-        ]);
-        return ApiResponse::success(['message' => 'Friend request sent']);
+
+        // Delegate to main friend request system (add-friend)
+        $request->merge(['target_id' => $friendId]);
+        return app(UserInteractionController::class)->addFriend($request, app(\App\Services\ApiCacheService::class));
     }
 
     private function getOrCreatePrivateConversation(int $userId1, int $userId2): ?int

@@ -26,6 +26,7 @@
                 <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
                 <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Email / Phone</th>
                 <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Role</th>
+                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
                 <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Balance</th>
                 <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Actions</th>
             </tr>
@@ -39,6 +40,18 @@
                 <td class="px-4 py-2">
                     <span class="px-2 py-0.5 rounded text-xs {{ $u->role === 'seller' ? 'bg-amber-100 text-amber-800' : 'bg-gray-100 text-gray-700' }}">{{ $u->role ?? 'user' }}</span>
                 </td>
+                <td class="px-4 py-2">
+                    @if ($u->isSuspended())
+                        <span class="px-2 py-0.5 rounded text-xs bg-red-100 text-red-800" title="{{ $u->suspended_reason }}">Suspended</span>
+                        @if ($u->suspended_until)
+                            <span class="text-xs text-gray-500 block">until {{ $u->suspended_until->format('M j, Y') }}</span>
+                        @else
+                            <span class="text-xs text-gray-500 block">indefinite</span>
+                        @endif
+                    @else
+                        <span class="px-2 py-0.5 rounded text-xs bg-green-100 text-green-800">Active</span>
+                    @endif
+                </td>
                 <td class="px-4 py-2">{{ number_format((int)($u->wallet_balance ?? $u->coin_balance ?? 0)) }}</td>
                 <td class="px-4 py-2 text-right">
                     <form method="POST" action="{{ route('admin.users.add-credit') }}" class="inline-flex items-center gap-1 mr-2">
@@ -48,6 +61,14 @@
                         <button type="submit" class="text-sm text-indigo-600 hover:underline">Add credit</button>
                     </form>
                     @if ($u->id !== auth()->id())
+                    @if ($u->isSuspended())
+                    <form method="POST" action="{{ route('admin.users.unsuspend', $u) }}" class="inline mr-2" onsubmit="return confirm('Unsuspend this user?');">
+                        @csrf
+                        <button type="submit" class="text-green-600 hover:underline">Unsuspend</button>
+                    </form>
+                    @else
+                    <a href="{{ route('admin.users.suspend-form', $u) }}" class="text-amber-600 hover:underline mr-2">Suspend</a>
+                    @endif
                     <form method="POST" action="{{ route('admin.users.destroy', $u) }}" class="inline" onsubmit="return confirm('Delete this user? This cannot be undone.');">
                         @csrf
                         @method('DELETE')
@@ -60,7 +81,7 @@
             </tr>
             @endforeach
             @if ($users->isEmpty())
-            <tr><td colspan="6" class="px-4 py-4 text-gray-500">No users found.</td></tr>
+            <tr><td colspan="7" class="px-4 py-4 text-gray-500">No users found.</td></tr>
             @endif
         </tbody>
     </table>

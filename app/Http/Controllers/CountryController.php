@@ -14,7 +14,8 @@ class CountryController extends Controller
      */
     public function index(Request $request, ApiCacheService $cache)
     {
-        $data = $cache->remember('countries', $cache->ttl('static'), function () {
+        $ttl = $cache->ttl('static');
+        $data = $cache->remember($cache->versionedKey('countries'), $ttl, function () {
             return Country::query()
                 ->orderByRaw("CASE WHEN id = 'IN' THEN 0 ELSE 1 END")
                 ->orderBy('name')
@@ -29,6 +30,6 @@ class CountryController extends Controller
                 ->all();
         });
 
-        return ApiResponse::success($data);
+        return $cache->applyHttpCacheHeaders($request, ApiResponse::success($data), $ttl, 'public');
     }
 }

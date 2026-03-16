@@ -4,8 +4,10 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\VirtualGift;
+use App\Services\ApiCacheService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\View\View;
 
 class GiftController extends Controller
@@ -23,7 +25,7 @@ class GiftController extends Controller
         return view('admin.gifts.create');
     }
 
-    public function store(Request $request): RedirectResponse
+    public function store(Request $request, ApiCacheService $cache): RedirectResponse
     {
         $validated = $request->validate([
             'name' => 'required|string|max:255',
@@ -39,9 +41,10 @@ class GiftController extends Controller
         $validated['is_active'] = $request->boolean('is_active');
         $validated['rarity'] = $validated['rarity'] ?? 'common';
 
+        $pullZone = rtrim(config('filesystems.disks.bunnycdn.pull_zone') ?: config('bunny.cdn_url', ''), '/');
         if ($request->hasFile('image')) {
-            $path = $request->file('image')->store('gifts', 'public');
-            $validated['image_url'] = url('/storage/' . $path);
+            $path = $request->file('image')->store('gifts', 'bunnycdn');
+            $validated['image_url'] = ($path !== false && $path !== '' && $pullZone !== '') ? $pullZone . '/' . ltrim($path, '/') : $request->input('image_url');
         } else {
             $validated['image_url'] = $request->input('image_url') ?: null;
         }
@@ -49,13 +52,15 @@ class GiftController extends Controller
         if ($request->hasFile('animation_file')) {
             $file = $request->file('animation_file');
             $filename = time() . '_' . $file->getClientOriginalName();
-            $path = $file->storeAs(self::ANIMATIONS_DISK_PATH, $filename, 'public');
-            $validated['animation_url'] = url('/storage/' . $path);
+            $path = $file->storeAs(self::ANIMATIONS_DISK_PATH, $filename, 'bunnycdn');
+            $validated['animation_url'] = ($path !== false && $path !== '' && $pullZone !== '') ? $pullZone . '/' . ltrim($path, '/') : $request->input('animation_url');
         } else {
             $validated['animation_url'] = $request->input('animation_url') ?: null;
         }
 
         VirtualGift::create($validated);
+        $cache->bumpVersion('gifts');
+        $cache->bumpVersion('gift_types');
         return redirect()->route('admin.gifts.index')->with('success', 'Gift created.');
     }
 
@@ -64,7 +69,7 @@ class GiftController extends Controller
         return view('admin.gifts.edit', ['gift' => $gift]);
     }
 
-    public function update(Request $request, VirtualGift $gift): RedirectResponse
+    public function update(Request $request, VirtualGift $gift, ApiCacheService $cache): RedirectResponse
     {
         $validated = $request->validate([
             'name' => 'required|string|max:255',
@@ -80,30 +85,21 @@ class GiftController extends Controller
         $validated['is_active'] = $request->boolean('is_active');
         $validated['rarity'] = $validated['rarity'] ?? 'common';
 
+        $pullZone = rtrim(config('filesystems.disks.bunnycdn.pull_zone') ?: config('bunny.cdn_url', ''), '/');
         if ($request->hasFile('image')) {
-            if ($gift->image_url && str_contains($gift->image_url, '/storage/gifts/')) {
-                $oldFile = public_path('storage/gifts/' . basename(parse_url($gift->image_url, PHP_URL_PATH)));
-                if (is_file($oldFile)) {
-                    @unlink($oldFile);
-                }
-            }
-            $path = $request->file('image')->store('gifts', 'public');
-            $validated['image_url'] = url('/storage/' . $path);
+            $this->deleteGiftFileIfOurs($gift->image_url);
+            $path = $request->file('image')->store('gifts', 'bunnycdn');
+            $validated['image_url'] = ($path !== false && $path !== '' && $pullZone !== '') ? $pullZone . '/' . ltrim($path, '/') : $request->input('image_url');
         } elseif ($request->filled('image_url')) {
             $validated['image_url'] = $request->input('image_url');
         }
 
         if ($request->hasFile('animation_file')) {
-            if ($gift->animation_url && str_contains($gift->animation_url, '/storage/gifts/animations/')) {
-                $oldFile = public_path('storage/gifts/animations/' . basename(parse_url($gift->animation_url, PHP_URL_PATH)));
-                if (is_file($oldFile)) {
-                    @unlink($oldFile);
-                }
-            }
+            $this->deleteGiftFileIfOurs($gift->animation_url);
             $file = $request->file('animation_file');
             $filename = time() . '_' . $file->getClientOriginalName();
-            $path = $file->storeAs(self::ANIMATIONS_DISK_PATH, $filename, 'public');
-            $validated['animation_url'] = url('/storage/' . $path);
+            $path = $file->storeAs(self::ANIMATIONS_DISK_PATH, $filename, 'bunnycdn');
+            $validated['animation_url'] = ($path !== false && $path !== '' && $pullZone !== '') ? $pullZone . '/' . ltrim($path, '/') : $gift->animation_url;
         } elseif ($request->filled('animation_url')) {
             $validated['animation_url'] = $request->input('animation_url');
         } else {
@@ -111,24 +107,42 @@ class GiftController extends Controller
         }
 
         $gift->update($validated);
+        $cache->bumpVersion('gifts');
+        $cache->bumpVersion('gift_types');
         return redirect()->route('admin.gifts.index')->with('success', 'Gift updated.');
     }
 
-    public function destroy(VirtualGift $gift): RedirectResponse
+    public function destroy(VirtualGift $gift, ApiCacheService $cache): RedirectResponse
     {
-        if ($gift->image_url && str_contains($gift->image_url, '/storage/gifts/')) {
-            $oldFile = public_path('storage/gifts/' . basename(parse_url($gift->image_url, PHP_URL_PATH)));
-            if (is_file($oldFile)) {
-                @unlink($oldFile);
-            }
-        }
-        if ($gift->animation_url && str_contains($gift->animation_url, '/storage/gifts/animations/')) {
-            $oldFile = public_path('storage/gifts/animations/' . basename(parse_url($gift->animation_url, PHP_URL_PATH)));
-            if (is_file($oldFile)) {
-                @unlink($oldFile);
-            }
-        }
+        $this->deleteGiftFileIfOurs($gift->image_url);
+        $this->deleteGiftFileIfOurs($gift->animation_url);
         $gift->delete();
+        $cache->bumpVersion('gifts');
+        $cache->bumpVersion('gift_types');
         return redirect()->route('admin.gifts.index')->with('success', 'Gift deleted.');
+    }
+
+    private function deleteGiftFileIfOurs(?string $fileUrl): void
+    {
+        if ($fileUrl === null || $fileUrl === '') {
+            return;
+        }
+        $cdnUrl = rtrim(config('filesystems.disks.bunnycdn.pull_zone') ?: config('bunny.cdn_url', ''), '/');
+        if ($cdnUrl !== '' && str_starts_with($fileUrl, $cdnUrl . '/')) {
+            $path = substr($fileUrl, strlen($cdnUrl . '/'));
+            if ($path !== '' && Storage::disk('bunnycdn')->exists($path)) {
+                Storage::disk('bunnycdn')->delete($path);
+            }
+            return;
+        }
+        if (str_contains($fileUrl, '/storage/')) {
+            $path = parse_url($fileUrl, PHP_URL_PATH);
+            if ($path) {
+                $relative = ltrim(preg_replace('#^/storage/#', '', $path), '/');
+                if ($relative !== '' && Storage::disk('public')->exists($relative)) {
+                    Storage::disk('public')->delete($relative);
+                }
+            }
+        }
     }
 }

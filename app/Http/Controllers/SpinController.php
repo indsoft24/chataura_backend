@@ -15,7 +15,8 @@ class SpinController extends Controller
      */
     public function prizes(Request $request, ApiCacheService $cache)
     {
-        $data = $cache->remember('spin_prizes', $cache->ttl('spin'), function () {
+        $ttl = $cache->ttl('spin');
+        $data = $cache->remember($cache->versionedKey('spin_prizes'), $ttl, function () {
             $prizes = collect(config('spin.prizes', []))->map(function ($p) {
                 return [
                     'label' => $p['label'],
@@ -29,7 +30,7 @@ class SpinController extends Controller
                 'prizes' => $prizes,
             ];
         });
-        return ApiResponse::success($data);
+        return $cache->applyHttpCacheHeaders($request, ApiResponse::success($data), $ttl, 'public');
     }
 
     /**

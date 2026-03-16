@@ -19,7 +19,8 @@ class GiftController extends Controller
      */
     public function index(ApiCacheService $cache)
     {
-        $data = $cache->remember('gift_types', $cache->ttl('catalog'), function () {
+        $ttl = $cache->ttl('gifts');
+        $data = $cache->remember($cache->versionedKey('gift_types'), $ttl, function () {
             $gifts = GiftType::where('is_active', true)
                 ->orderBy('coin_price')
                 ->get(['id', 'name', 'coin_price', 'image_url', 'animation_url']);
@@ -48,7 +49,7 @@ class GiftController extends Controller
                 ])->values()->all(),
             ];
         });
-        return ApiResponse::success($data);
+        return $cache->applyHttpCacheHeaders(request(), ApiResponse::success($data), $ttl, 'public');
     }
 
     /**

@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\WalletPackage;
+use App\Services\ApiCacheService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\View\View;
@@ -21,7 +22,7 @@ class PackageController extends Controller
         return view('admin.packages.create');
     }
 
-    public function store(Request $request): RedirectResponse
+    public function store(Request $request, ApiCacheService $cache): RedirectResponse
     {
         $validated = $request->validate([
             'coin_amount' => 'required|integer|min:1',
@@ -31,6 +32,7 @@ class PackageController extends Controller
         $validated['is_active'] = $request->boolean('is_active');
 
         WalletPackage::create($validated);
+        $cache->bumpVersion('wallet_packages');
         return redirect()->route('admin.packages.index')->with('success', 'Package created.');
     }
 
@@ -39,7 +41,7 @@ class PackageController extends Controller
         return view('admin.packages.edit', ['package' => $package]);
     }
 
-    public function update(Request $request, WalletPackage $package): RedirectResponse
+    public function update(Request $request, WalletPackage $package, ApiCacheService $cache): RedirectResponse
     {
         $validated = $request->validate([
             'coin_amount' => 'required|integer|min:1',
@@ -49,12 +51,14 @@ class PackageController extends Controller
         $validated['is_active'] = $request->boolean('is_active');
 
         $package->update($validated);
+        $cache->bumpVersion('wallet_packages');
         return redirect()->route('admin.packages.index')->with('success', 'Package updated.');
     }
 
-    public function destroy(WalletPackage $package): RedirectResponse
+    public function destroy(WalletPackage $package, ApiCacheService $cache): RedirectResponse
     {
         $package->delete();
+        $cache->bumpVersion('wallet_packages');
         return redirect()->route('admin.packages.index')->with('success', 'Package deleted.');
     }
 }

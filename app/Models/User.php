@@ -50,6 +50,9 @@ class User extends Authenticatable
         'invited_by',
         'password',
         'last_seen_at',
+        'is_suspended',
+        'suspended_reason',
+        'suspended_until',
     ];
 
     /**
@@ -88,6 +91,8 @@ class User extends Authenticatable
         'gift_notifications' => 'boolean',
         'dob' => 'date',
         'last_seen_at' => 'datetime',
+        'is_suspended' => 'boolean',
+        'suspended_until' => 'datetime',
     ];
     }
 
@@ -163,8 +168,6 @@ class User extends Authenticatable
     public function friends()
     {
         return $this->belongsToMany(User::class, 'friendships', 'user_id', 'friend_id')
-            ->withPivot('status')
-            ->wherePivot('status', Friendship::STATUS_ACCEPTED)
             ->withTimestamps();
     }
 
@@ -188,9 +191,42 @@ class User extends Authenticatable
         return $this->hasMany(BlockedUser::class, 'blocked_id');
     }
 
+    public function likedPosts()
+    {
+        return $this->belongsToMany(MediaPost::class, 'post_likes', 'user_id', 'media_post_id')
+            ->withTimestamps();
+    }
+
+    public function savedPosts()
+    {
+        return $this->belongsToMany(MediaPost::class, 'post_saves', 'user_id', 'media_post_id')
+            ->withTimestamps();
+    }
+
+    public function comments()
+    {
+        return $this->hasMany(PostComment::class);
+    }
+
     public function isSeller(): bool
     {
         return $this->role === self::ROLE_SELLER;
+    }
+
+    /**
+     * User is considered suspended if is_suspended is true and either
+     * suspended_until is null (permanent) or suspended_until is in the future.
+     * If suspended_until has passed, they are no longer suspended.
+     */
+    public function isSuspended(): bool
+    {
+        if (!$this->is_suspended) {
+            return false;
+        }
+        if ($this->suspended_until === null) {
+            return true;
+        }
+        return $this->suspended_until->isFuture();
     }
 
     public function selectedFrame()

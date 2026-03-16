@@ -100,6 +100,7 @@ class SeatController extends Controller
 
             $seat->user_id = $user->id;
             $seat->is_muted = false;
+            $seat->last_heartbeat_at = now();
             $seat->save();
 
             $member->seat_index = $seatIndex;
@@ -183,6 +184,7 @@ class SeatController extends Controller
 
             $seat->user_id = $targetUserId;
             $seat->is_muted = false;
+            $seat->last_heartbeat_at = now();
             $seat->save();
 
             $targetMember->seat_index = $seatIndex;

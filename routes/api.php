@@ -12,13 +12,20 @@ use App\Http\Controllers\GroupController;
 use App\Http\Controllers\InviteController;
 use App\Http\Controllers\LanguageController;
 use App\Http\Controllers\MessageController;
+use App\Http\Controllers\MusicController;
 use App\Http\Controllers\ProfileLevelController;
+use App\Http\Controllers\PostEngagementController;
+use App\Http\Controllers\PostFeedController;
+use App\Http\Controllers\PostMediaController;
+use App\Http\Controllers\ReelController;
+use App\Http\Controllers\ReelsFeedController;
 use App\Http\Controllers\RoomController;
 use App\Http\Controllers\SeatController;
 use App\Http\Controllers\SpinController;
 use App\Http\Controllers\UploadController;
 use App\Http\Controllers\UserController;
 use App\Http\Controllers\UserInteractionController;
+use App\Http\Controllers\UserMediaController;
 use App\Http\Controllers\WalletController;
 use Illuminate\Support\Facades\Route;
 
@@ -49,7 +56,7 @@ Route::prefix('v1')->group(function () {
     // -------------------------------------------------------------------------
     // Protected routes
     // -------------------------------------------------------------------------
-    Route::middleware(['auth.api'])->group(function () {
+    Route::middleware(['auth.api', 'check.suspension'])->group(function () {
 
         // Auth (protected: OTP, change password)
         Route::prefix('auth')->group(function () {
@@ -69,10 +76,14 @@ Route::prefix('v1')->group(function () {
             Route::get('/me/balance', [UserController::class, 'wallet']);
             Route::get('/me/transactions', [UserController::class, 'transactions']);
             Route::get('/search', [UserController::class, 'search']);
+            Route::post('/follow', [UserInteractionController::class, 'follow']);
+            Route::post('/unfollow', [UserInteractionController::class, 'unfollow']);
+            Route::post('/friend-request', [UserInteractionController::class, 'sendFriendRequest']);
             Route::get('/{id}/followers', [UserInteractionController::class, 'followers']);
             Route::get('/{id}/following', [UserInteractionController::class, 'following']);
             Route::get('/{id}/gifts', [UserInteractionController::class, 'gifts']);
             Route::get('/{id}/privileges', [UserInteractionController::class, 'privileges']);
+            Route::get('/{id}/media', [UserInteractionController::class, 'media']);
             Route::get('/{id}', [UserInteractionController::class, 'show']);
         });
 
@@ -88,6 +99,29 @@ Route::prefix('v1')->group(function () {
         Route::post('/upload', [UploadController::class, 'upload']);
         Route::post('/user/update-language', [UserController::class, 'updateLanguage']);
 
+        // Reels & Posts (Bunny CDN)
+        Route::get('/me/posts', [UserMediaController::class, 'myPosts']);
+        Route::get('/me/reels', [UserMediaController::class, 'myReels']);
+        Route::post('/reels/upload', [ReelController::class, 'upload']);
+        Route::get('/reels/feed', [ReelsFeedController::class, 'feed']);
+        Route::get('/reels/trending', [ReelsFeedController::class, 'trending']);
+        Route::get('/reels/discover', [ReelsFeedController::class, 'discover']);
+        Route::post('/posts/upload', [PostMediaController::class, 'upload']);
+        Route::get('/posts/feed', [PostFeedController::class, 'feed']);
+        Route::put('/posts/{id}', [UserMediaController::class, 'updatePost']);
+        Route::delete('/posts/{id}', [UserMediaController::class, 'deletePost']);
+        Route::post('/posts/{id}/like', [PostEngagementController::class, 'like']);
+        Route::post('/posts/{id}/comment', [PostEngagementController::class, 'comment']);
+        Route::get('/posts/{id}/comments', [PostEngagementController::class, 'getComments']);
+        Route::post('/posts/{id}/save', [PostEngagementController::class, 'save']);
+        Route::post('/posts/{id}/share', [PostEngagementController::class, 'share']);
+        Route::put('/reels/{id}', [UserMediaController::class, 'updateReel']);
+        Route::delete('/reels/{id}', [UserMediaController::class, 'deleteReel']);
+
+        // Music library
+        Route::get('/music/library', [MusicController::class, 'library']);
+        Route::get('/music/trending', [MusicController::class, 'trending']);
+
         // User interaction (follow, friend, block)
         Route::post('/user/follow', [UserInteractionController::class, 'follow']);
         Route::post('/user/unfollow', [UserInteractionController::class, 'unfollow']);
@@ -95,6 +129,7 @@ Route::prefix('v1')->group(function () {
         Route::post('/user/accept-follow-request', [UserInteractionController::class, 'acceptFollowRequest']);
         Route::post('/user/reject-follow-request', [UserInteractionController::class, 'rejectFollowRequest']);
         Route::get('/user/friend-requests', [UserInteractionController::class, 'friendRequests']);
+        Route::get('/user/friend-requests/count', [UserInteractionController::class, 'friendRequestsCount']);
         Route::post('/user/add-friend', [UserInteractionController::class, 'addFriend']);
         Route::post('/user/friend-request', [UserInteractionController::class, 'sendFriendRequest']);
         Route::post('/user/friend-request/accept', [UserInteractionController::class, 'acceptFriendRequestByRequest']);
@@ -102,7 +137,13 @@ Route::prefix('v1')->group(function () {
         Route::post('/user/accept-friend', [UserInteractionController::class, 'acceptFriend']);
         Route::post('/user/reject-friend', [UserInteractionController::class, 'rejectFriend']);
         Route::post('/user/block', [UserInteractionController::class, 'block']);
+        Route::post('/user/unfriend', [UserInteractionController::class, 'unfriend']);
         Route::get('/user/{id}', [UserInteractionController::class, 'show']); // Alias for GET /users/{id}
+
+        // Public profile relationship lists (followers, following, friends)
+        Route::get('/users/{id}/followers', [UserInteractionController::class, 'followers']);
+        Route::get('/users/{id}/following', [UserInteractionController::class, 'following']);
+        Route::get('/users/{id}/friends', [UserInteractionController::class, 'friendsForUser']);
 
         // Device (FCM)
         Route::post('/device/register', [UserController::class, 'registerDevice']);
@@ -128,6 +169,7 @@ Route::prefix('v1')->group(function () {
             Route::delete('/{roomId}', [RoomController::class, 'destroy']);
             Route::post('/{roomId}/join', [RoomController::class, 'join']);
             Route::post('/{roomId}/leave', [RoomController::class, 'leave']);
+            Route::post('/{roomId}/heartbeat', [RoomController::class, 'heartbeat']);
             Route::post('/{roomId}/co-host', [RoomController::class, 'promoteToCoHost']);
             Route::post('/{roomId}/transfer-host', [RoomController::class, 'transferHost']);
             Route::get('/{roomId}/token', [RoomController::class, 'getToken']);

@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\Country;
+use App\Services\ApiCacheService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -22,7 +23,7 @@ class CountryController extends Controller
         return view('admin.countries.create');
     }
 
-    public function store(Request $request): RedirectResponse
+    public function store(Request $request, ApiCacheService $cache): RedirectResponse
     {
         $validated = $request->validate([
             'id' => 'required|string|max:10|unique:countries,id',
@@ -33,8 +34,9 @@ class CountryController extends Controller
 
         $validated['flag_url'] = null;
         if ($request->hasFile('flag')) {
-            $path = $request->file('flag')->store('flags', 'public');
-            $validated['flag_url'] = rtrim(config('app.url'), '/') . '/storage/' . ltrim($path, '/');
+            $path = $request->file('flag')->store('flags', 'bunnycdn');
+            $pullZone = rtrim(config('filesystems.disks.bunnycdn.pull_zone') ?: config('bunny.cdn_url', ''), '/');
+            $validated['flag_url'] = ($path !== false && $path !== '' && $pullZone !== '') ? $pullZone . '/' . ltrim($path, '/') : null;
         }
 
         Country::create([
@@ -43,6 +45,7 @@ class CountryController extends Controller
             'flag_emoji' => $validated['flag_emoji'] ?? null,
             'flag_url' => $validated['flag_url'],
         ]);
+        $cache->bumpVersion('countries');
 
         return redirect()->route('admin.countries.index')->with('success', 'Country created.');
     }
@@ -52,7 +55,7 @@ class CountryController extends Controller
         return view('admin.countries.edit', ['country' => $country]);
     }
 
-    public function update(Request $request, Country $country): RedirectResponse
+    public function update(Request $request, Country $country, ApiCacheService $cache): RedirectResponse
     {
         $validated = $request->validate([
             'name' => 'required|string|max:255',
@@ -65,29 +68,44 @@ class CountryController extends Controller
             'flag_emoji' => $validated['flag_emoji'] ?? null,
         ];
         if ($request->hasFile('flag')) {
-            if ($country->flag_url) {
-                $oldPath = str_replace(rtrim(config('app.url'), '/') . '/storage/', '', $country->flag_url);
-                if ($oldPath && Storage::disk('public')->exists($oldPath)) {
-                    Storage::disk('public')->delete($oldPath);
-                }
-            }
-            $path = $request->file('flag')->store('flags', 'public');
-            $update['flag_url'] = rtrim(config('app.url'), '/') . '/storage/' . ltrim($path, '/');
+            $this->deleteCountryFlagIfOurs($country->flag_url);
+            $path = $request->file('flag')->store('flags', 'bunnycdn');
+            $pullZone = rtrim(config('filesystems.disks.bunnycdn.pull_zone') ?: config('bunny.cdn_url', ''), '/');
+            $update['flag_url'] = ($path !== false && $path !== '' && $pullZone !== '') ? $pullZone . '/' . ltrim($path, '/') : $country->flag_url;
         }
         $country->update($update);
+        $cache->bumpVersion('countries');
 
         return redirect()->route('admin.countries.index')->with('success', 'Country updated.');
     }
 
-    public function destroy(Country $country): RedirectResponse
+    public function destroy(Country $country, ApiCacheService $cache): RedirectResponse
     {
-        if ($country->flag_url) {
-            $oldPath = str_replace(rtrim(config('app.url'), '/') . '/storage/', '', $country->flag_url);
-            if ($oldPath && Storage::disk('public')->exists($oldPath)) {
-                Storage::disk('public')->delete($oldPath);
+        $this->deleteCountryFlagIfOurs($country->flag_url);
+        $country->delete();
+        $cache->bumpVersion('countries');
+        return redirect()->route('admin.countries.index')->with('success', 'Country deleted.');
+    }
+
+    private function deleteCountryFlagIfOurs(?string $flagUrl): void
+    {
+        if ($flagUrl === null || $flagUrl === '') {
+            return;
+        }
+        $cdnUrl = rtrim(config('filesystems.disks.bunnycdn.pull_zone') ?: config('bunny.cdn_url', ''), '/');
+        if ($cdnUrl !== '' && str_starts_with($flagUrl, $cdnUrl . '/')) {
+            $path = substr($flagUrl, strlen($cdnUrl . '/'));
+            if ($path !== '' && Storage::disk('bunnycdn')->exists($path)) {
+                Storage::disk('bunnycdn')->delete($path);
+            }
+            return;
+        }
+        $base = rtrim(config('app.url'), '/') . '/storage/';
+        if (str_starts_with($flagUrl, $base)) {
+            $path = substr($flagUrl, strlen($base));
+            if ($path !== '' && Storage::disk('public')->exists($path)) {
+                Storage::disk('public')->delete($path);
             }
         }
-        $country->delete();
-        return redirect()->route('admin.countries.index')->with('success', 'Country deleted.');
     }
 }

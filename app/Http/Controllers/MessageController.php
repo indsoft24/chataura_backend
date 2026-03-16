@@ -5,17 +5,19 @@ namespace App\Http\Controllers;
 use App\Helpers\ApiResponse;
 use App\Models\ConversationParticipant;
 use App\Models\Message;
+use App\Services\BunnyStorageService;
 use App\Services\FirebaseCallService;
 use App\Services\FirebaseService;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
 class MessageController extends Controller
 {
     public function __construct(
         private FirebaseService $firebase,
-        private FirebaseCallService $firebaseCall
+        private FirebaseCallService $firebaseCall,
+        private BunnyStorageService $bunny
     ) {}
 
     /**
@@ -78,8 +80,14 @@ class MessageController extends Controller
         } catch (ValidationException $e) {
             return ApiResponse::validationError('Validation failed', $e->errors());
         }
-        $path = $request->file('image')->store('chat_media', 'public');
-        $url = rtrim(config('app.url'), '/') . '/storage/' . ltrim($path, '/');
+        $file = $request->file('image');
+        $ext = strtolower($file->getClientOriginalExtension() ?: 'jpg');
+        $path = 'chat_media/' . (string) Str::ulid() . '.' . $ext;
+        try {
+            $url = $this->bunny->uploadImage($file, $path);
+        } catch (\Throwable $e) {
+            return ApiResponse::error('UPLOAD_FAILED', 'Failed to store image on CDN', 500);
+        }
         return ApiResponse::success(['url' => $url]);
     }
 

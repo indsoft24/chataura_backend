@@ -3,8 +3,39 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="description" content="Chat Aura — Social audio & party rooms. Voice and video calls, live rooms, virtual gifts, and real-time chat. Download the Android app.">
-    <title>Chat Aura — Voice, Video & Party Rooms</title>
+
+    {{-- Favicon (Chat Aura brand icon) --}}
+    <link rel="icon" type="image/jpeg" href="{{ asset('favicon.jpg') }}" sizes="any">
+    <link rel="apple-touch-icon" href="{{ asset('favicon.jpg') }}">
+
+    {{-- SEO: title & meta --}}
+    @php
+        $seoTitle = 'Chat Aura — Voice, Video & Party Rooms | Social Audio & Live Rooms';
+        $seoDescription = 'Chat Aura is your ultimate social space: party rooms, 1-to-1 voice & video calls, virtual gifts, and real-time chat. Download the Android app and connect with friends.';
+        $canonicalUrl = config('app.url', 'https://chataura.in');
+        $ogImage = $canonicalUrl . '/favicon.jpg';
+    @endphp
+    <title>{{ $seoTitle }}</title>
+    <meta name="title" content="{{ $seoTitle }}">
+    <meta name="description" content="{{ $seoDescription }}">
+    <link rel="canonical" href="{{ $canonicalUrl }}">
+
+    {{-- Open Graph (Facebook, LinkedIn, etc.) --}}
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="{{ $canonicalUrl }}">
+    <meta property="og:title" content="{{ $seoTitle }}">
+    <meta property="og:description" content="{{ $seoDescription }}">
+    <meta property="og:image" content="{{ $ogImage }}">
+    <meta property="og:site_name" content="Chat Aura">
+    <meta property="og:locale" content="{{ str_replace('_', '-', app()->getLocale()) }}">
+
+    {{-- Twitter Card --}}
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:url" content="{{ $canonicalUrl }}">
+    <meta name="twitter:title" content="{{ $seoTitle }}">
+    <meta name="twitter:description" content="{{ $seoDescription }}">
+    <meta name="twitter:image" content="{{ $ogImage }}">
+
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,400&display=swap" rel="stylesheet">

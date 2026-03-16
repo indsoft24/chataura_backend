@@ -5,9 +5,11 @@ namespace App\Http\Controllers;
 use App\Events\RoomMemberJoined;
 use App\Events\RoomMemberLeft;
 use App\Helpers\ApiResponse;
+use App\Models\Country;
 use App\Models\Room;
 use App\Models\RoomMember;
 use App\Models\RoomTheme;
+use App\Models\Seat;
 use App\Models\User;
 use App\Services\ApiCacheService;
 use App\Services\AgoraService;
@@ -36,7 +38,8 @@ class RoomController extends Controller
      */
     public function themes()
     {
-        $data = $this->cache->remember('room_themes', $this->cache->ttl('catalog'), function () {
+        $ttl = $this->cache->ttl('catalog');
+        $data = $this->cache->remember($this->cache->versionedKey('room_themes'), $ttl, function () {
             return RoomTheme::where('is_active', true)
                 ->orderBy('name')
                 ->get(['id', 'name', 'type', 'media_url'])
@@ -49,7 +52,7 @@ class RoomController extends Controller
                 ->values()
                 ->all();
         });
-        return ApiResponse::success($data);
+        return $this->cache->applyHttpCacheHeaders(request(), ApiResponse::success($data), $ttl, 'public');
     }
 
     /**
@@ -58,6 +61,9 @@ class RoomController extends Controller
     public function store(Request $request)
     {
         try {
+            $normalizedRoomCountry = $this->normalizeRoomCountryCode(
+                $request->input('country_code', $request->input('allowed_country'))
+            );
             $validated = $request->validate([
                 'title' => 'required|string|max:255',
                 'max_seats' => 'nullable|integer|min:1|max:20',
@@ -69,6 +75,7 @@ class RoomController extends Controller
                 'description' => 'nullable|string|max:1000',
                 'tags' => 'nullable|array',
                 'allowed_gender' => 'nullable|string|in:Male,Female',
+                'country_code' => 'nullable|string|max:100',
                 'allowed_country' => 'nullable|string|max:100',
                 'min_age' => 'nullable|integer|min:1|max:120',
                 'max_age' => 'nullable|integer|min:1|max:120',
@@ -93,12 +100,13 @@ class RoomController extends Controller
                 'description' => $validated['description'] ?? null,
                 'tags' => $validated['tags'] ?? [],
                 'allowed_gender' => $validated['allowed_gender'] ?? null,
-                'allowed_country' => $validated['allowed_country'] ?? null,
+                'allowed_country' => $normalizedRoomCountry,
                 'min_age' => $validated['min_age'] ?? null,
                 'max_age' => $validated['max_age'] ?? null,
                 'is_live' => true,
                 'status' => Room::STATUS_ACTIVE,
                 'last_activity_at' => now(),
+                'host_last_heartbeat_at' => now(),
             ]);
 
             $room->display_id = $this->generateUniqueRoomDisplayId();
@@ -122,7 +130,8 @@ class RoomController extends Controller
                 ]);
             }
 
-            return ApiResponse::success($room->load('owner'));
+            $this->cache->bumpVersion('rooms');
+            return ApiResponse::success($this->roomWithHost($room->load(['owner', 'host', 'coHost', 'theme'])));
         } catch (ValidationException $e) {
             return ApiResponse::validationError('Validation failed', $e->errors());
         } catch (\Exception $e) {
@@ -161,12 +170,14 @@ class RoomController extends Controller
         $roomData['members_count'] = $activeMembersCount;
         $roomData['current_seats'] = $seats;
         $roomData['host'] = $this->formatHostForResponse($room->getCurrentHostUser());
+        $roomData = array_merge($roomData, $this->roomCountryMeta($room->allowed_country));
         $roomData['theme'] = $room->theme ? [
             'id' => $room->theme->id,
             'name' => $room->theme->name,
             'type' => $room->theme->type,
             'media_url' => $room->theme->media_url,
         ] : null;
+        $roomData['allowed_country'] = $roomData['country_code'];
 
         return ApiResponse::success($roomData);
     }
@@ -186,85 +197,105 @@ class RoomController extends Controller
         $following = $request->boolean('following');
         $friends = $request->boolean('friends');
         $user = $request->user();
+        $normalizedFilterCountry = $this->normalizeRoomCountryCode($country);
+        $ttl = $this->cache->ttl('rooms');
+        $cacheKey = $this->cache->versionedKey('rooms', [
+            'page' => $page,
+            'limit' => $limit,
+            'sort' => $sort,
+            'country' => $normalizedFilterCountry,
+            'owner' => $ownerId !== null && $ownerId !== '' ? (int) $ownerId : null,
+            'following' => $following,
+            'friends' => $friends,
+            'viewer' => ($following || $friends) ? ($user?->id ?? 0) : 0,
+        ]);
 
-        $query = Room::with(['owner', 'host', 'coHost'])
-            ->where('is_live', true)
-            ->where('status', Room::STATUS_ACTIVE)
-            ->whereNull('deleted_at');
+        $payload = $this->cache->remember($cacheKey, $ttl, function () use ($country, $normalizedFilterCountry, $ownerId, $following, $friends, $sort, $user, $page, $limit) {
+            $query = Room::with(['owner', 'host', 'coHost'])
+                ->where('is_live', true)
+                ->where('status', Room::STATUS_ACTIVE)
+                ->whereNull('deleted_at');
 
-        if ($country !== null && $country !== '') {
-            if (strtolower(trim($country)) === 'other') {
-                $countryIds = \App\Models\Country::pluck('id')->all();
-                $query->whereHas('owner', function ($q) use ($countryIds) {
-                    $q->where(function ($q2) use ($countryIds) {
-                        $q2->whereNotIn('country', $countryIds)
-                            ->orWhereRaw('LOWER(TRIM(country)) = ?', ['other']);
-                    });
-                });
-            } else {
-                $query->whereHas('owner', function ($q) use ($country) {
-                    $q->where('country', $country);
-                });
+            $treatAsGlobalFilter = $country === null
+                || trim((string) $country) === ''
+                || strtolower(trim((string) $country)) === 'null';
+
+            if (!$treatAsGlobalFilter && $normalizedFilterCountry !== null) {
+                $query->where('allowed_country', $normalizedFilterCountry);
             }
-        }
 
-        if ($ownerId !== null && $ownerId !== '') {
-            $query->where('owner_id', (int) $ownerId);
-        }
+            if ($ownerId !== null && $ownerId !== '') {
+                $query->where('owner_id', (int) $ownerId);
+            }
 
-        if ($following) {
-            $followingIds = \App\Models\UserFollower::where('follower_id', $user->id)
-                ->where('status', \App\Models\UserFollower::STATUS_ACCEPTED)
-                ->pluck('following_id');
-            $query->whereIn('owner_id', $followingIds);
-        }
+            if ($following && $user) {
+                $followingIds = \App\Models\UserFollower::where('follower_id', $user->id)
+                    ->where('status', \App\Models\UserFollower::STATUS_ACCEPTED)
+                    ->pluck('following_id');
+                $query->whereIn('owner_id', $followingIds);
+            }
 
-        if ($friends) {
-            $friendIds = $user->friends()->pluck('id');
-            $query->whereIn('owner_id', $friendIds);
-        }
+            if ($friends && $user) {
+                $friendIds = $user->friends()->pluck('id');
+                $query->whereIn('owner_id', $friendIds);
+            }
 
-        if ($sort === 'popular') {
-            $query->withCount('activeMembers')
-                ->orderBy('active_members_count', 'desc')
-                ->orderBy('created_at', 'desc');
-        } else {
-            $query->orderBy('created_at', 'desc');
-        }
+            if ($sort === 'popular') {
+                $query->withCount('activeMembers')
+                    ->orderBy('active_members_count', 'desc')
+                    ->orderBy('created_at', 'desc');
+            } else {
+                $query->orderBy('created_at', 'desc');
+            }
 
-        $total = $query->count();
-        $rooms = $query->skip(($page - 1) * $limit)
-            ->take($limit)
-            ->get()
-            ->map(function ($room) {
-                return [
-                    'id' => $room->id,
-                    'display_id' => $room->display_id ?? (string) $room->display_id,
-                    'title' => $room->title,
-                    'owner' => [
-                        'id' => $room->owner->id,
-                        'display_name' => $room->owner->display_name,
-                        'avatar_url' => $room->owner->avatar_url,
-                    ],
-                    'host' => $room->host ? [
-                        'id' => $room->host->id,
-                        'display_name' => $room->host->display_name,
-                        'avatar_url' => $room->host->avatar_url,
-                    ] : null,
-                    'co_host' => $room->coHost ? [
-                        'id' => $room->coHost->id,
-                        'display_name' => $room->coHost->display_name,
-                        'avatar_url' => $room->coHost->avatar_url,
-                    ] : null,
-                    'members_count' => $room->activeMembers()->count(),
-                    'max_seats' => $room->max_seats,
-                    'is_live' => $room->is_live,
-                    'cover_image_url' => $room->cover_image_url,
-                    'created_at' => $room->created_at,
-                ];
-            });
+            $total = $query->count();
+            $rooms = $query->skip(($page - 1) * $limit)
+                ->take($limit)
+                ->get()
+                ->map(function ($room) {
+                    $roomCountry = $this->roomCountryMeta($room->allowed_country);
+                    return [
+                        'id' => $room->id,
+                        'display_id' => $room->display_id ?? (string) $room->display_id,
+                        'title' => $room->title,
+                        'owner' => [
+                            'id' => $room->owner->id,
+                            'display_name' => $room->owner->display_name,
+                            'avatar_url' => $room->owner->avatar_url,
+                        ],
+                        'host' => $room->host ? [
+                            'id' => $room->host->id,
+                            'display_name' => $room->host->display_name,
+                            'avatar_url' => $room->host->avatar_url,
+                        ] : null,
+                        'co_host' => $room->coHost ? [
+                            'id' => $room->coHost->id,
+                            'display_name' => $room->coHost->display_name,
+                            'avatar_url' => $room->coHost->avatar_url,
+                        ] : null,
+                        'members_count' => $room->activeMembers()->count(),
+                        'max_seats' => $room->max_seats,
+                        'is_live' => $room->is_live,
+                        'country_code' => $roomCountry['country_code'],
+                        'country_name' => $roomCountry['country_name'],
+                        'allowed_country' => $roomCountry['country_code'],
+                        'cover_image_url' => $room->cover_image_url,
+                        'created_at' => $room->created_at?->toIso8601String(),
+                    ];
+                });
 
-        return ApiResponse::success($rooms, ApiResponse::paginationMeta($total, $page, $limit));
+            return [
+                'data' => $rooms,
+                'meta' => ApiResponse::paginationMeta($total, $page, $limit),
+            ];
+        });
+
+        return $this->cache->applyHttpCacheHeaders(
+            $request,
+            ApiResponse::success($payload['data'], $payload['meta']),
+            $ttl,
+            ($following || $friends) ? 'private' : 'public'
+        );
     }
 
     /**
@@ -300,10 +331,17 @@ class RoomController extends Controller
                 'cover_image_url' => 'nullable|url|max:500',
                 'theme_id' => 'nullable|integer|exists:room_themes,id',
                 'allowed_gender' => 'nullable|string|in:Male,Female',
+                'country_code' => 'nullable|string|max:100',
                 'allowed_country' => 'nullable|string|max:100',
                 'min_age' => 'nullable|integer|min:1|max:120',
                 'max_age' => 'nullable|integer|min:1|max:120',
             ]);
+
+            if ($request->has('country_code') || $request->has('allowed_country')) {
+                $validated['allowed_country'] = $this->normalizeRoomCountryCode(
+                    $request->input('country_code', $request->input('allowed_country'))
+                );
+            }
 
             $room->fill($validated);
             $room->save();
@@ -327,10 +365,8 @@ class RoomController extends Controller
                 }
             }
 
-            $room->load('owner');
-            $payload = $room->toArray();
-            $payload['cover_image_url'] = $room->cover_image_url;
-            return ApiResponse::success($payload);
+            $this->cache->bumpVersion('rooms');
+            return ApiResponse::success($this->roomWithHost($room->load(['owner', 'host', 'coHost', 'theme'])));
         } catch (ValidationException $e) {
             return ApiResponse::validationError('Validation failed', $e->errors());
         } catch (\Exception $e) {
@@ -355,6 +391,7 @@ class RoomController extends Controller
 
         $this->destroyRoom->endRoom($room);
         $room->delete();
+        $this->cache->bumpVersion('rooms');
 
         return ApiResponse::success(['message' => 'Room closed successfully']);
     }
@@ -391,7 +428,7 @@ class RoomController extends Controller
                 ]);
             }
 
-            // Eligibility: host restrictions (gender, country, age)
+            // Eligibility: host restrictions (gender, age). Country is metadata only.
             $eligibilityError = $this->checkRoomEligibility($room, $user);
             if ($eligibilityError !== null) {
                 return ApiResponse::error('NOT_ELIGIBLE', $eligibilityError, 403);
@@ -419,6 +456,7 @@ class RoomController extends Controller
             $agoraUid = $this->agoraService->generateUid();
             $agoraToken = $this->agoraService->generateRtcToken($room, $agoraUid);
             $roomPayload = $this->roomWithHost($room->load(['owner', 'host', 'coHost', 'theme']));
+            $this->cache->bumpVersion('rooms');
             return ApiResponse::success([
                 'room' => $roomPayload,
                 'member' => $this->formatMemberForJoinResponse($room, $member),
@@ -431,7 +469,7 @@ class RoomController extends Controller
     }
 
     /**
-     * Check if user is eligible to join the room (gender, country, age). Returns error message or null if eligible.
+     * Check if user is eligible to join the room (gender, age). Returns error message or null if eligible.
      */
     private function checkRoomEligibility(Room $room, User $user): ?string
     {
@@ -441,14 +479,6 @@ class RoomController extends Controller
             $userGender = trim((string) ($user->gender ?? ''));
             $allowed = trim((string) $room->allowed_gender);
             if (strcasecmp($userGender, $allowed) !== 0) {
-                return $message;
-            }
-        }
-
-        if ($room->allowed_country !== null && $room->allowed_country !== '') {
-            $userCountry = trim((string) ($user->country ?? ''));
-            $allowed = trim((string) $room->allowed_country);
-            if (strcasecmp($userCountry, $allowed) !== 0) {
                 return $message;
             }
         }
@@ -518,6 +548,7 @@ class RoomController extends Controller
             $this->destroyRoom->endRoom($room);
         }
 
+        $this->cache->bumpVersion('rooms');
         return ApiResponse::success(['message' => 'Left room successfully']);
     }
 
@@ -606,6 +637,8 @@ class RoomController extends Controller
             }
 
             $room->refresh();
+            $room->host_last_heartbeat_at = now();
+            $room->save();
             $newHostUser = User::find($newHostUserId);
             return ApiResponse::success([
                 'message' => 'Host transferred successfully',
@@ -663,6 +696,45 @@ class RoomController extends Controller
     }
 
     /**
+     * POST /api/v1/rooms/{roomId}/heartbeat — Call every ~30s while user is in the room (in a seat or as host).
+     * Keeps seat/host from being auto-freed. If no heartbeat for 60s, cleanup task will free the seat or end the room.
+     */
+    public function heartbeat(Request $request, string $roomId)
+    {
+        $room = Room::findByIdOrDisplayId($roomId);
+        if (!$room || $room->trashed() || !$room->isActive()) {
+            return ApiResponse::notFound('Room not found or closed');
+        }
+
+        $user = $request->user();
+        $member = RoomMember::where('room_id', $room->id)
+            ->where('user_id', $user->id)
+            ->where('is_active', true)
+            ->first();
+
+        if (!$member) {
+            return ApiResponse::forbidden('You must be in the room to send heartbeat');
+        }
+
+        $now = now();
+
+        // Update seat heartbeat if user is in a seat
+        $seat = Seat::where('room_id', $room->id)->where('user_id', $user->id)->first();
+        if ($seat) {
+            $seat->last_heartbeat_at = $now;
+            $seat->save();
+        }
+
+        // Update host heartbeat if user is the current host
+        if ($this->roomService->isHost($room, $user->id)) {
+            $room->host_last_heartbeat_at = $now;
+            $room->save();
+        }
+
+        return ApiResponse::success(['ok' => true]);
+    }
+
+    /**
      * Generate a unique 6-digit (or 8-digit fallback) display_id for rooms.
      */
     private function generateUniqueRoomDisplayId(): string
@@ -704,6 +776,7 @@ class RoomController extends Controller
     private function roomWithHost(Room $room): array
     {
         $data = $room->toArray();
+        $roomCountry = $this->roomCountryMeta($room->allowed_country);
         $data['host'] = $this->formatHostForResponse($room->getCurrentHostUser());
         $data['co_host'] = $this->formatHostForResponse($room->coHost);
         $data['theme'] = $room->theme ? [
@@ -712,7 +785,52 @@ class RoomController extends Controller
             'type' => $room->theme->type,
             'media_url' => $room->theme->media_url,
         ] : null;
+        $data['country_code'] = $roomCountry['country_code'];
+        $data['country_name'] = $roomCountry['country_name'];
+        $data['allowed_country'] = $roomCountry['country_code'];
         return $data;
+    }
+
+    private function normalizeRoomCountryCode($value): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        $normalized = strtoupper(trim((string) $value));
+        if ($normalized === '' || $normalized === 'NULL' || $normalized === 'GLOBAL') {
+            return null;
+        }
+        if ($normalized === 'OTHER') {
+            return 'OTHER';
+        }
+
+        return preg_match('/^[A-Z]{2}$/', $normalized) ? $normalized : null;
+    }
+
+    private function roomCountryMeta(?string $code): array
+    {
+        $countryCode = $this->normalizeRoomCountryCode($code);
+        if ($countryCode === null) {
+            return [
+                'country_code' => null,
+                'country_name' => null,
+            ];
+        }
+
+        if ($countryCode === 'OTHER') {
+            return [
+                'country_code' => 'OTHER',
+                'country_name' => 'Other',
+            ];
+        }
+
+        $country = Country::find($countryCode);
+
+        return [
+            'country_code' => $countryCode,
+            'country_name' => $country?->name,
+        ];
     }
 
     /**

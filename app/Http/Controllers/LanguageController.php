@@ -14,13 +14,14 @@ class LanguageController extends Controller
      */
     public function index(Request $request, ApiCacheService $cache)
     {
-        $data = $cache->remember('languages', $cache->ttl('static'), function () {
+        $ttl = $cache->ttl('static');
+        $data = $cache->remember($cache->versionedKey('languages'), $ttl, function () {
             return Language::orderBy('sort_order')->orderBy('name')->get()->map(fn ($l) => [
                 'code' => $l->code,
                 'name' => $l->name,
                 'native_name' => $l->native_name,
             ])->values()->all();
         });
-        return ApiResponse::success($data);
+        return $cache->applyHttpCacheHeaders($request, ApiResponse::success($data), $ttl, 'public');
     }
 }

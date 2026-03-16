@@ -109,7 +109,11 @@ class GroupController extends Controller
         $oldImageUrl = $group->image_url;
         $this->deleteGroupImageFileIfOurs($oldImageUrl);
 
-        $newUrl = rtrim(config('app.url'), '/') . '/storage/' . ltrim($storagePath, '/');
+        $pullZone = rtrim(config('filesystems.disks.bunnycdn.pull_zone') ?: config('bunny.cdn_url', ''), '/');
+        $newUrl = $pullZone !== '' ? $pullZone . '/' . ltrim($storagePath, '/') : null;
+        if ($newUrl === null) {
+            return ApiResponse::error('UPLOAD_FAILED', 'CDN not configured', 500);
+        }
         $group->update(['image_url' => $newUrl]);
 
         $conversation = Conversation::find($group->conversation_id);
@@ -402,16 +406,24 @@ class GroupController extends Controller
             return false;
         }
         $jpeg = ob_get_clean();
-        Storage::disk('public')->put($storagePath, $jpeg);
+        Storage::disk('bunnycdn')->put($storagePath, $jpeg);
         return true;
     }
 
     /**
-     * If the given URL is our app's storage URL, delete that file so we don't leave orphans.
+     * If the given URL is our app's storage URL or BunnyCDN pull zone URL, delete that file so we don't leave orphans.
      */
     private function deleteGroupImageFileIfOurs(?string $imageUrl): void
     {
         if ($imageUrl === null || $imageUrl === '') {
+            return;
+        }
+        $cdnUrl = rtrim(config('filesystems.disks.bunnycdn.pull_zone') ?: config('bunny.cdn_url', ''), '/');
+        if ($cdnUrl !== '' && str_starts_with($imageUrl, $cdnUrl . '/')) {
+            $relative = substr($imageUrl, strlen($cdnUrl . '/'));
+            if ($relative !== '' && Storage::disk('bunnycdn')->exists($relative)) {
+                Storage::disk('bunnycdn')->delete($relative);
+            }
             return;
         }
         $base = rtrim(config('app.url'), '/');

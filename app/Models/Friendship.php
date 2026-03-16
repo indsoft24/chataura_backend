@@ -7,10 +7,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class Friendship extends Model
 {
-    protected $fillable = ['user_id', 'friend_id', 'status'];
-
-    public const STATUS_PENDING = 'pending';
-    public const STATUS_ACCEPTED = 'accepted';
+    protected $fillable = ['user_id', 'friend_id'];
 
     public function user(): BelongsTo
     {

@@ -16,6 +16,7 @@ class Seat extends Model
         'user_id',
         'is_muted',
         'is_locked',
+        'last_heartbeat_at',
     ];
 
     protected function casts(): array
@@ -24,6 +25,7 @@ class Seat extends Model
             'seat_index' => 'integer',
             'is_muted' => 'boolean',
             'is_locked' => 'boolean',
+            'last_heartbeat_at' => 'datetime',
         ];
     }
 

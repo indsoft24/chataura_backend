@@ -36,6 +36,7 @@ class Room extends Model
         'max_age',
         'ended_at',
         'last_activity_at',
+        'host_last_heartbeat_at',
     ];
 
     protected function casts(): array
@@ -50,6 +51,7 @@ class Room extends Model
             'settings' => 'array',
             'ended_at' => 'datetime',
             'last_activity_at' => 'datetime',
+            'host_last_heartbeat_at' => 'datetime',
         ];
     }
 

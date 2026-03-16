@@ -6,15 +6,22 @@ use App\Helpers\ApiResponse;
 use App\Models\BlockedUser;
 use App\Models\Country;
 use App\Models\Friendship;
+use App\Models\FriendRequest;
 use App\Models\User;
 use App\Models\UserDevice;
 use App\Models\UserFollower;
+use App\Services\ApiCacheService;
+use App\Services\BunnyStorageService;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
 class UserController extends Controller
 {
+    public function __construct(
+        private BunnyStorageService $bunny
+    ) {}
+
     /**
      * GET /users/search - Search users by ID (exact) or by name/email (fuzzy).
      * If query is purely numeric, exact match on users.id first; else name-based search.
@@ -82,10 +89,12 @@ class UserController extends Controller
         $user = $request->user();
         $friendsCount = Friendship::where(function ($q) use ($user) {
             $q->where('user_id', $user->id)->orWhere('friend_id', $user->id);
-        })->where('status', Friendship::STATUS_ACCEPTED)->count();
+        })->count();
         $followersCount = UserFollower::where('following_id', $user->id)->where('status', \App\Models\UserFollower::STATUS_ACCEPTED)->count();
         $followingCount = UserFollower::where('follower_id', $user->id)->where('status', \App\Models\UserFollower::STATUS_ACCEPTED)->count();
-        $friendRequestsCount = Friendship::where('friend_id', $user->id)->where('status', Friendship::STATUS_PENDING)->count();
+        $friendRequestsCount = FriendRequest::where('receiver_id', $user->id)
+            ->where('status', FriendRequest::STATUS_PENDING)
+            ->count();
         $coins = (int) ($user->wallet_balance ?? $user->coin_balance ?? 0);
         $data = [
             'id' => (int) $user->id,
@@ -119,7 +128,7 @@ class UserController extends Controller
      * POST /user/update - Multipart: name, avatar, country, bio, gender, dob (all optional).
      * Content-Type: multipart/form-data. Returns updated user object with profile fields.
      */
-    public function update(Request $request)
+    public function update(Request $request, ApiCacheService $cache)
     {
         $request->validate([
             'name' => 'nullable|string|max:255',
@@ -131,8 +140,21 @@ class UserController extends Controller
         ]);
         $user = $request->user();
         if ($request->hasFile('avatar')) {
-            $path = $request->file('avatar')->store('avatars', 'public');
-            $user->avatar_url = rtrim(config('app.url'), '/') . '/storage/' . ltrim($path, '/');
+            $avatarFile = $request->file('avatar');
+            $cdnBase = rtrim(config('bunny.cdn_url', ''), '/');
+            if ($user->avatar_url && $cdnBase !== '' && str_starts_with($user->avatar_url, $cdnBase . '/')) {
+                $oldPath = substr($user->avatar_url, strlen($cdnBase . '/'));
+                if ($oldPath !== '') {
+                    $this->bunny->deleteFile($oldPath);
+                }
+            }
+            $ext = strtolower($avatarFile->getClientOriginalExtension() ?: 'jpg');
+            $path = 'avatars/' . $user->id . '/' . (string) Str::ulid() . '.' . $ext;
+            try {
+                $user->avatar_url = $this->bunny->uploadImage($avatarFile, $path);
+            } catch (\Throwable $e) {
+                return ApiResponse::error('UPLOAD_FAILED', 'Avatar upload failed.', 500);
+            }
         }
         if ($request->filled('name')) {
             $user->display_name = $request->input('name');
@@ -152,6 +174,7 @@ class UserController extends Controller
         }
         $user->save();
         $user->refresh();
+        $cache->bumpVersion('profile');
         $resolved = $this->resolveCountryForUser($user);
         $walletBalance = (int) ($user->wallet_balance ?? $user->coin_balance ?? 0);
         return ApiResponse::success([
@@ -202,7 +225,7 @@ class UserController extends Controller
      * POST /api/v1/user/unblock - Body: blocked_user_id (ID of user to unblock).
      * Also accepts user_id for backward compatibility.
      */
-    public function unblock(Request $request)
+    public function unblock(Request $request, ApiCacheService $cache)
     {
         $request->validate([
             'blocked_user_id' => 'required_without:user_id|integer|exists:users,id',
@@ -211,6 +234,7 @@ class UserController extends Controller
         $user = $request->user();
         $blockedId = (int) ($request->input('blocked_user_id') ?? $request->input('user_id'));
         BlockedUser::where('blocker_id', $user->id)->where('blocked_id', $blockedId)->delete();
+        $cache->bumpVersion('profile');
         return response()->json([
             'success' => true,
             'message' => 'User unblocked successfully.',
@@ -332,7 +356,9 @@ class UserController extends Controller
         $data['referral_code'] = $user->invite_code;
         $data['referral_balance'] = (int) ($user->referral_balance ?? 0);
         $data['gems'] = (int) ($user->gems ?? 0);
-        $data['friend_requests_count'] = (int) Friendship::where('friend_id', $user->id)->where('status', Friendship::STATUS_PENDING)->count();
+        $data['friend_requests_count'] = (int) FriendRequest::where('receiver_id', $user->id)
+            ->where('status', FriendRequest::STATUS_PENDING)
+            ->count();
         $data['private_account'] = (bool) $user->private_account;
         $data['show_online_status'] = (bool) $user->show_online_status;
         $data['is_online'] = $user->isOnline();
@@ -344,7 +370,7 @@ class UserController extends Controller
     /**
      * Update current user profile (PATCH /users/me). country accepts country id (e.g. IN) or name (e.g. India).
      */
-    public function updateMe(Request $request)
+    public function updateMe(Request $request, ApiCacheService $cache)
     {
         try {
             $validated = $request->validate([
@@ -366,6 +392,7 @@ class UserController extends Controller
             }
 
             $user->save();
+            $cache->bumpVersion('profile');
 
             $data = $user->makeHidden(['password', 'remember_token', 'fcm_token'])->toArray();
             if (isset($data['dob']) && $data['dob']) {

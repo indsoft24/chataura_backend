@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "6fc47cb3916acfb97ff8cff684ae84db",
+    "content-hash": "f265a1b0bba6231672b428d15fcd821a",
     "packages": [
         {
             "name": "beste/clock",
@@ -3871,6 +3871,127 @@
                 }
             ],
             "time": "2025-12-27T19:41:33+00:00"
+        },
+        {
+            "name": "platformcommunity/flysystem-bunnycdn",
+            "version": "v3.3.10",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/PlatformCommunity/flysystem-bunnycdn.git",
+                "reference": "97f34d0ee658dd3737852b554a1a2290a6b9114a"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/PlatformCommunity/flysystem-bunnycdn/zipball/97f34d0ee658dd3737852b554a1a2290a6b9114a",
+                "reference": "97f34d0ee658dd3737852b554a1a2290a6b9114a",
+                "shasum": ""
+            },
+            "require": {
+                "ext-json": "*",
+                "guzzlehttp/guzzle": "^7.4",
+                "league/flysystem": "^3.16",
+                "league/mime-type-detection": "^1.11"
+            },
+            "require-dev": {
+                "fzaninotto/faker": "^1.5",
+                "laravel/pint": "^0.2.3",
+                "league/flysystem-adapter-test-utilities": "^3",
+                "league/flysystem-memory": "^3.0",
+                "league/flysystem-path-prefixing": "^3.3",
+                "phpstan/phpstan": "^2.1",
+                "phpunit/phpunit": "^10.0"
+            },
+            "type": "library",
+            "extra": {
+                "branch-alias": {
+                    "dev-master": "3.x-dev"
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "PlatformCommunity\\Flysystem\\BunnyCDN\\": "src/",
+                    "PlatformCommunity\\Flysystem\\BunnyCDN\\Tests\\": "tests/"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "authors": [
+                {
+                    "name": "Alex",
+                    "email": "alex@platformapp.io"
+                }
+            ],
+            "description": "Flysystem adapter for BunnyCDN",
+            "support": {
+                "issues": "https://github.com/PlatformCommunity/flysystem-bunnycdn/issues",
+                "source": "https://github.com/PlatformCommunity/flysystem-bunnycdn/tree/v3.3.10"
+            },
+            "time": "2026-02-04T14:29:44+00:00"
+        },
+        {
+            "name": "predis/predis",
+            "version": "v3.4.2",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/predis/predis.git",
+                "reference": "2033429520d8997a7815a2485f56abe6d2d0e075"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/predis/predis/zipball/2033429520d8997a7815a2485f56abe6d2d0e075",
+                "reference": "2033429520d8997a7815a2485f56abe6d2d0e075",
+                "shasum": ""
+            },
+            "require": {
+                "php": "^7.2 || ^8.0",
+                "psr/http-message": "^1.0|^2.0"
+            },
+            "require-dev": {
+                "friendsofphp/php-cs-fixer": "^3.3",
+                "phpstan/phpstan": "^1.9",
+                "phpunit/phpcov": "^6.0 || ^8.0",
+                "phpunit/phpunit": "^8.0 || ~9.4.4"
+            },
+            "suggest": {
+                "ext-relay": "Faster connection with in-memory caching (>=0.6.2)"
+            },
+            "type": "library",
+            "autoload": {
+                "psr-4": {
+                    "Predis\\": "src/"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "authors": [
+                {
+                    "name": "Till Krüss",
+                    "homepage": "https://till.im",
+                    "role": "Maintainer"
+                }
+            ],
+            "description": "A flexible and feature-complete Redis/Valkey client for PHP.",
+            "homepage": "http://github.com/predis/predis",
+            "keywords": [
+                "nosql",
+                "predis",
+                "redis"
+            ],
+            "support": {
+                "issues": "https://github.com/predis/predis/issues",
+                "source": "https://github.com/predis/predis/tree/v3.4.2"
+            },
+            "funding": [
+                {
+                    "url": "https://github.com/sponsors/tillkruss",
+                    "type": "github"
+                }
+            ],
+            "time": "2026-03-09T20:33:04+00:00"
         },
         {
             "name": "psr/cache",

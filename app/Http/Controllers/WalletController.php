@@ -27,9 +27,10 @@ class WalletController extends Controller
     /**
      * GET /api/v1/wallet/packages – active wallet packages. Cached.
      */
-    public function packages()
+    public function packages(Request $request)
     {
-        $data = $this->cache->remember('wallet_packages', $this->cache->ttl('catalog'), function () {
+        $ttl = $this->cache->ttl('catalog');
+        $data = $this->cache->remember($this->cache->versionedKey('wallet_packages'), $ttl, function () {
             $packages = WalletPackage::where('is_active', true)
                 ->orderBy('price_in_inr')
                 ->get(['id', 'coin_amount', 'price_in_inr']);
@@ -41,7 +42,7 @@ class WalletController extends Controller
                 ])->values()->all(),
             ];
         });
-        return ApiResponse::success($data);
+        return $this->cache->applyHttpCacheHeaders($request, ApiResponse::success($data), $ttl, 'public');
     }
 
     /**
@@ -348,9 +349,10 @@ class WalletController extends Controller
     /**
      * GET /api/v1/gifts – active virtual gifts. Cached.
      */
-    public function gifts()
+    public function gifts(Request $request)
     {
-        $data = $this->cache->remember('wallet_gifts', $this->cache->ttl('catalog'), function () {
+        $ttl = $this->cache->ttl('catalog');
+        $data = $this->cache->remember($this->cache->versionedKey('gifts'), $ttl, function () {
             $gifts = VirtualGift::where('is_active', true)
                 ->orderBy('coin_cost')
                 ->get(['id', 'name', 'image_url', 'animation_url', 'coin_cost']);
@@ -364,7 +366,7 @@ class WalletController extends Controller
                 ])->values()->all(),
             ];
         });
-        return ApiResponse::success($data);
+        return $this->cache->applyHttpCacheHeaders($request, ApiResponse::success($data), $ttl, 'public');
     }
 
     /**
