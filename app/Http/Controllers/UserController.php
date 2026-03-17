@@ -12,6 +12,7 @@ use App\Models\UserDevice;
 use App\Models\UserFollower;
 use App\Services\ApiCacheService;
 use App\Services\BunnyStorageService;
+use App\Services\LevelService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
@@ -19,7 +20,8 @@ use Illuminate\Validation\ValidationException;
 class UserController extends Controller
 {
     public function __construct(
-        private BunnyStorageService $bunny
+        private BunnyStorageService $bunny,
+        private LevelService $levelService,
     ) {}
 
     /**
@@ -87,6 +89,9 @@ class UserController extends Controller
     public function profile(Request $request)
     {
         $user = $request->user();
+        // Compute level analytics (min/max XP and progress) using the same logic as /user/level.
+        $levelPayload = $this->levelService->levelPayload($user);
+
         $friendsCount = Friendship::where(function ($q) use ($user) {
             $q->where('user_id', $user->id)->orWhere('friend_id', $user->id);
         })->count();
@@ -101,6 +106,12 @@ class UserController extends Controller
             'name' => $user->display_name ?? $user->name ?? 'User',
             'avatar' => $user->avatar_url,
             'level' => (int) ($user->level ?? 0),
+            'exp' => (int) ($user->exp ?? 0),
+            'xp' => (int) ($user->xp ?? 0),
+            'level_min_xp' => (int) ($levelPayload['level_min_xp'] ?? 0),
+            'level_max_xp' => (int) ($levelPayload['level_max_xp'] ?? 0),
+            'xp_progress_pct' => (float) ($levelPayload['xp_progress_pct'] ?? 0),
+            'selected_frame_id' => $user->selected_frame_id ? (int) $user->selected_frame_id : null,
             'friends_count' => (int) $friendsCount,
             'followers_count' => (int) $followersCount,
             'following_count' => (int) $followingCount,

@@ -42,6 +42,7 @@ class PostEngagementController extends Controller
             'status' => 'success',
             'success' => true,
             'isLiked' => $liked,
+            'is_liked' => $liked,
             'liked' => $liked,
             'likes' => (int) $post->likes,
         ]);
@@ -153,6 +154,7 @@ class PostEngagementController extends Controller
             'status' => 'success',
             'success' => true,
             'isSaved' => $saved,
+            'is_saved' => $saved,
             'saved' => $saved,
         ]);
     }

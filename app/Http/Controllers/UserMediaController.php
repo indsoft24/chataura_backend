@@ -4,6 +4,9 @@ namespace App\Http\Controllers;
 
 use App\Helpers\ApiResponse;
 use App\Models\MediaPost;
+use App\Models\PostLike;
+use App\Models\PostSave;
+use App\Models\UserFollower;
 use App\Services\ApiCacheService;
 use App\Services\BunnyStorageService;
 use Illuminate\Http\JsonResponse;
@@ -84,6 +87,150 @@ class UserMediaController extends Controller
         $meta = ApiResponse::paginationMeta($paginator->total(), $paginator->currentPage(), $paginator->perPage());
 
         return ApiResponse::success($items, $meta);
+    }
+
+    /**
+     * GET /api/v1/me/saved - Paginated list of posts and reels saved by the current user.
+     * Format: FeedResponse<MediaPost> (same as posts/feed and reels/feed). is_saved is true for all items.
+     */
+    public function mySaved(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        if (!$user) {
+            return ApiResponse::unauthorized();
+        }
+
+        $page = max(1, (int) $request->query('page', 1));
+        $perPage = min(max(1, (int) $request->query('limit', 20)), 50);
+
+        $paginator = MediaPost::query()
+            ->select('media_posts.*')
+            ->join('post_saves', 'media_posts.id', '=', 'post_saves.media_post_id')
+            ->where('post_saves.user_id', $user->id)
+            ->orderBy('post_saves.created_at', 'desc')
+            ->with('user:id,display_name,name,avatar_url')
+            ->paginate($perPage, ['media_posts.*'], 'page', $page);
+
+        $collection = $paginator->getCollection();
+        $postIds = $collection->pluck('id')->all();
+        $authorIds = $collection->pluck('user_id')->unique()->filter()->values()->all();
+        $likedIds = $this->viewerLikedIds($user->id, $postIds);
+        $followingIds = $this->viewerFollowingIds($user->id, $authorIds);
+
+        $data = $collection->map(function (MediaPost $item) use ($likedIds, $followingIds) {
+            return $this->feedItem($item, $likedIds, [], $followingIds, saved: true);
+        })->values()->all();
+
+        return response()->json([
+            'data' => $data,
+            'current_page' => $paginator->currentPage(),
+            'next_page_url' => $paginator->hasMorePages() ? $paginator->nextPageUrl() : null,
+            'has_more' => $paginator->hasMorePages(),
+            'last_page' => $paginator->lastPage(),
+            'per_page' => $paginator->perPage(),
+        ]);
+    }
+
+    /**
+     * GET /api/v1/me/liked - Paginated list of posts and reels liked by the current user.
+     * Format: FeedResponse<MediaPost>. is_liked is true for all items.
+     */
+    public function myLiked(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        if (!$user) {
+            return ApiResponse::unauthorized();
+        }
+
+        $page = max(1, (int) $request->query('page', 1));
+        $perPage = min(max(1, (int) $request->query('limit', 20)), 50);
+
+        $paginator = MediaPost::query()
+            ->select('media_posts.*')
+            ->join('post_likes', 'media_posts.id', '=', 'post_likes.media_post_id')
+            ->where('post_likes.user_id', $user->id)
+            ->orderBy('post_likes.created_at', 'desc')
+            ->with('user:id,display_name,name,avatar_url')
+            ->paginate($perPage, ['media_posts.*'], 'page', $page);
+
+        $collection = $paginator->getCollection();
+        $postIds = $collection->pluck('id')->all();
+        $authorIds = $collection->pluck('user_id')->unique()->filter()->values()->all();
+        $savedIds = $this->viewerSavedIds($user->id, $postIds);
+        $followingIds = $this->viewerFollowingIds($user->id, $authorIds);
+
+        $data = $collection->map(function (MediaPost $item) use ($savedIds, $followingIds) {
+            return $this->feedItem($item, [], $savedIds, $followingIds, liked: true);
+        })->values()->all();
+
+        return response()->json([
+            'data' => $data,
+            'current_page' => $paginator->currentPage(),
+            'next_page_url' => $paginator->hasMorePages() ? $paginator->nextPageUrl() : null,
+            'has_more' => $paginator->hasMorePages(),
+            'last_page' => $paginator->lastPage(),
+            'per_page' => $paginator->perPage(),
+        ]);
+    }
+
+    /**
+     * Build a single feed item (MediaPost format) for FeedResponse. Optional overrides for saved/liked.
+     */
+    private function feedItem(
+        MediaPost $item,
+        array $likedIds,
+        array $savedIds,
+        array $followingIds,
+        bool $saved = false,
+        bool $liked = false
+    ): array {
+        $row = $item->toFeedItem();
+        $row['isLiked'] = $liked || isset($likedIds[$item->id]);
+        $row['isSaved'] = $saved || isset($savedIds[$item->id]);
+        $row['is_liked'] = $row['isLiked'];
+        $row['is_saved'] = $row['isSaved'];
+        $row['likes'] = (int) $item->likes;
+        $row['comments'] = (int) $item->comments;
+        if ($item->relationLoaded('user') && $item->user) {
+            $row['user'] = [
+                'id' => $item->user->id,
+                'name' => $item->user->display_name ?? $item->user->name ?? 'User',
+                'avatar' => $item->user->avatar_url ?? '',
+                'isFollowing' => isset($followingIds[$item->user->id]),
+                'display_name' => $item->user->display_name ?? $item->user->name ?? 'User',
+                'avatar_url' => $item->user->avatar_url ?? '',
+            ];
+        }
+        return $row;
+    }
+
+    private function viewerLikedIds(int $userId, array $postIds): array
+    {
+        if (empty($postIds)) {
+            return [];
+        }
+        return PostLike::where('user_id', $userId)->whereIn('media_post_id', $postIds)->pluck('media_post_id')->flip()->all();
+    }
+
+    private function viewerSavedIds(int $userId, array $postIds): array
+    {
+        if (empty($postIds)) {
+            return [];
+        }
+        return PostSave::where('user_id', $userId)->whereIn('media_post_id', $postIds)->pluck('media_post_id')->flip()->all();
+    }
+
+    private function viewerFollowingIds(int $userId, array $authorIds): array
+    {
+        if (empty($authorIds)) {
+            return [];
+        }
+        return UserFollower::where('follower_id', $userId)
+            ->whereIn('following_id', $authorIds)
+            ->where('status', UserFollower::STATUS_ACCEPTED)
+            ->pluck('following_id')
+            ->flip()
+            ->all();
     }
 
     /**

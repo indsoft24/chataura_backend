@@ -183,6 +183,8 @@ class ReelsFeedController extends Controller
         $row = $item->toFeedItem();
         $row['isLiked'] = isset($likedIds[$item->id]);
         $row['isSaved'] = isset($savedIds[$item->id]);
+        $row['is_liked'] = $row['isLiked'];
+        $row['is_saved'] = $row['isSaved'];
         $row['likes'] = (int) $item->likes;
         $row['comments'] = (int) $item->comments;
         if ($item->relationLoaded('user') && $item->user) {

@@ -102,6 +102,8 @@ Route::prefix('v1')->group(function () {
         // Reels & Posts (Bunny CDN)
         Route::get('/me/posts', [UserMediaController::class, 'myPosts']);
         Route::get('/me/reels', [UserMediaController::class, 'myReels']);
+        Route::get('/me/saved', [UserMediaController::class, 'mySaved']);
+        Route::get('/me/liked', [UserMediaController::class, 'myLiked']);
         Route::post('/reels/upload', [ReelController::class, 'upload']);
         Route::get('/reels/feed', [ReelsFeedController::class, 'feed']);
         Route::get('/reels/trending', [ReelsFeedController::class, 'trending']);
@@ -115,6 +117,14 @@ Route::prefix('v1')->group(function () {
         Route::get('/posts/{id}/comments', [PostEngagementController::class, 'getComments']);
         Route::post('/posts/{id}/save', [PostEngagementController::class, 'save']);
         Route::post('/posts/{id}/share', [PostEngagementController::class, 'share']);
+
+        // Reels: same MediaPost as posts; support /reels/{id}/... so app works from Reels UI
+        Route::post('/reels/{id}/like', [PostEngagementController::class, 'like']);
+        Route::post('/reels/{id}/comment', [PostEngagementController::class, 'comment']);
+        Route::get('/reels/{id}/comments', [PostEngagementController::class, 'getComments']);
+        Route::post('/reels/{id}/save', [PostEngagementController::class, 'save']);
+        Route::post('/reels/{id}/share', [PostEngagementController::class, 'share']);
+
         Route::put('/reels/{id}', [UserMediaController::class, 'updateReel']);
         Route::delete('/reels/{id}', [UserMediaController::class, 'deleteReel']);
 

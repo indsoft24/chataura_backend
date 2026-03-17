@@ -243,6 +243,9 @@ class ProfileLevelController extends Controller
         return [
             'level' => (int) ($payload['level'] ?? 0),
             'xp' => (int) ($payload['xp'] ?? 0),
+            // exp kept as alias for xp so older analytics that read `exp`
+            // continue to work while xp is the source of truth.
+            'exp' => (int) ($payload['xp'] ?? 0),
             'levelMaxXp' => (int) ($payload['level_max_xp'] ?? 0),
             'xpProgressPct' => (float) ($payload['xp_progress_pct'] ?? 0),
             'levelUp' => (bool) ($payload['level_up'] ?? false),
